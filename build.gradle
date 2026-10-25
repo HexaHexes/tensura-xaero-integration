@@ -1,0 +1,217 @@
+plugins {
+    id 'java-library'
+    id 'net.neoforged.moddev' version '2.0.148'
+}
+
+version = mod_version
+group = mod_group_id
+
+base {
+    // Keep in sync with rootProject.name in settings.gradle and mod_id in
+    // gradle.properties. The shipped jar is <archivesName>-<version>.jar.
+    archivesName = mod_id
+}
+
+java {
+    toolchain.languageVersion = JavaLanguageVersion.of(21)
+}
+
+// Game tests live in their own source set: they compile against main, and are
+// deliberately NOT part of sourceSets.main - so none of it is packaged into the
+// released jar. Declared before neoForge because the mods block below joins it.
+sourceSets {
+    gametest {
+        compileClasspath += sourceSets.main.output + configurations.compileClasspath
+        runtimeClasspath += output + sourceSets.main.output + configurations.runtimeClasspath
+    }
+}
+
+neoForge {
+    version = project.neo_version
+
+    runs {
+        client {
+            client()
+        }
+
+        server {
+            server()
+            programArgument '--nogui'
+        }
+
+        // Headless test runner. NeoForge's patched server Main boots a
+        // GameTestServer that runs every registered @GameTest and exits - no
+        // window, no live instance. This is the only automated in-game gate.
+        gameTestServer {
+            type = "gameTestServer"
+            gameDirectory = project.layout.projectDirectory.dir('run')
+        }
+    }
+
+    mods {
+        "${mod_id}" {
+            sourceSet sourceSets.main
+            // The gametest source set joins the mod for the dev runs so
+            // @GameTestHolder is discovered from FML's scan data. It is still
+            // not in the jar - the jar only packages sourceSets.main.
+            sourceSet sourceSets.gametest
+        }
+    }
+}
+
+// Expand the ${...} placeholders in src/main/templates into the real
+// neoforge.mods.toml at build time, so mod identity is edited in one place
+// (gradle.properties) rather than duplicated in the toml.
+def generateModMetadata = tasks.register('generateModMetadata', ProcessResources) {
+    def replaceProperties = [
+            minecraft_version          : minecraft_version,
+            minecraft_version_range    : minecraft_version_range,
+            neo_version                : neo_version,
+            loader_version_range       : loader_version_range,
+            mod_id                     : mod_id,
+            mod_name                   : mod_name,
+            mod_license                : mod_license,
+            mod_version                : mod_version,
+            mod_authors                : mod_authors,
+            mod_description            : mod_description,
+            tensura_mod_version        : tensura_mod_version,
+            xaero_minimap_mod_version  : xaero_minimap_mod_version,
+            xaero_world_map_mod_version: xaero_world_map_mod_version,
+    ]
+    inputs.properties replaceProperties
+    expand replaceProperties
+    from 'src/main/templates'
+    into layout.buildDirectory.dir('generated/sources/modMetadata')
+}
+// Feed the generated metadata in as a resource dir; passing the task provider
+// wires the dependency so the toml is generated before resources are processed.
+sourceSets.main.resources.srcDir generateModMetadata
+neoForge.ideSyncTask generateModMetadata
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+}
+
+// JUnit suite: the CI junit check grades it and refuses to pass on an empty
+// run, so this configuration must stay wired in every derived repo.
+repositories {
+    // CurseMaven - resolves mod jars by CurseForge project + file id. Every mod
+    // dependency this repo declares (Tensura, its library closure, both Xaero
+    // mods) resolves from here, so a clean checkout needs no local jars.
+    maven {
+        name = 'CurseMaven'
+        url = 'https://cursemaven.com'
+        content { includeGroup 'curse.maven' }
+    }
+    mavenCentral()
+}
+
+configurations {
+    // Runtime closure for the dev server/GameTest runs: staged into run/mods by
+    // prepareGametestMods, exactly like the rest of the org's mod repos. Every
+    // entry resolves from CurseMaven, so a clean checkout (and CI) works.
+    gametestMods
+    // ManasCore's bundle jar, only used to explode its nested module jars for
+    // compilation (see extractManascoreModules).
+    manascoreBundle
+}
+
+// ManasCore ships its modules as FML nested jars under META-INF/jars. FML
+// installs them at runtime, but javac cannot see inside them, and Tensura's
+// public chunk-storage types extend ManasCore types (Storage, ManasConfig).
+// Explode those nested jars onto the compile classpath. The input still comes
+// from CurseMaven - nothing is committed, and no local folder is an input.
+def manascoreModulesDir = layout.buildDirectory.dir('manascore-modules')
+def extractManascoreModules = tasks.register('extractManascoreModules', Sync) {
+    from({ configurations.manascoreBundle.collect { zipTree(it) } })
+    include 'META-INF/jars/*.jar'
+    eachFile { it.path = it.name }
+    includeEmptyDirs = false
+    into manascoreModulesDir
+}
+def manascoreModuleJars = fileTree(dir: manascoreModulesDir.get().asFile, include: '*.jar')
+
+tasks.withType(JavaCompile).configureEach {
+    dependsOn extractManascoreModules
+}
+
+dependencies {
+    // Tensura: Reincarnated - the authoritative concentration source. Compile
+    // only: all rights reserved, never bundled or committed.
+    compileOnly "curse.maven:tensura-reincarnated-643695:${tensura_file_id}"
+    // ManasCore and Architectury: API types reachable from Tensura's public
+    // surface (storage holder, event types). Present whenever Tensura is.
+    compileOnly "curse.maven:manascore-619025:${manascore_file_id}"
+    compileOnly files(manascoreModuleJars)
+    compileOnly "curse.maven:architectury-419699:${architectury_file_id}"
+
+    // Xaero's Minimap and World Map - the optional display targets. Compile
+    // only and client-only: they are never on a server run's classpath and are
+    // never bundled. Drop the two jars into run/mods for a manual client check.
+    compileOnly "curse.maven:xaeros-minimap-263420:${xaero_minimap_file_id}"
+    compileOnly "curse.maven:xaeros-world-map-317780:${xaero_world_map_file_id}"
+
+    manascoreBundle "curse.maven:manascore-619025:${manascore_file_id}"
+
+    // Tensura's own required dependency closure, for the run-only mods folder.
+    gametestMods "curse.maven:tensura-reincarnated-643695:${tensura_file_id}"
+    gametestMods "curse.maven:manascore-619025:${manascore_file_id}"
+    gametestMods "curse.maven:architectury-419699:${architectury_file_id}"
+    gametestMods "curse.maven:geckolib-388172:${geckolib_file_id}"
+    gametestMods "curse.maven:smartbrainlib-661293:${smartbrainlib_file_id}"
+    gametestMods "curse.maven:terrablender-940057:${terrablender_file_id}"
+
+    testImplementation platform('org.junit:junit-bom:5.10.2')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+// Stage Tensura and its closure into the run's production-style mods/ folder,
+// where FML's mods-folder locator finds them exactly like in a pack.
+tasks.register('prepareGametestMods', Sync) {
+    from configurations.gametestMods
+    into 'run/mods'
+}
+
+tasks.matching { it.name == 'runGameTestServer' || it.name == 'runServer' }.configureEach {
+    dependsOn 'prepareGametestMods'
+}
+
+test {
+    useJUnitPlatform()
+}
+
+// --- GameTest harness -------------------------------------------------------
+
+// Grade the run on the log summary, not the exit code: the GameTestServer prints
+// "All N required tests passed :)" when every required test succeeds. Keep
+// expectedTests in sync with the @GameTest methods in src/gametest.
+tasks.matching { it.name == 'runGameTestServer' }.configureEach {
+    def expectedTests = 5
+    doLast {
+        def log = file('run/logs/latest.log')
+        if (!log.exists()) {
+            throw new GradleException("GameTest produced no log at ${log}")
+        }
+        def text = log.text
+        def problems = []
+        def passMatcher = (text =~ /All (\d+) required tests passed/)
+        if (passMatcher.find()) {
+            def passed = passMatcher.group(1) as int
+            if (passed != expectedTests) {
+                problems << "only ${passed}/${expectedTests} tests passed"
+            }
+        } else if ((text =~ /\d+ required tests failed/).find()) {
+            problems << 'GameTest reported failed tests'
+        } else {
+            problems << 'no GameTest summary found in log'
+        }
+        if (text.contains('Encountered an unexpected exception')) {
+            problems << 'server crashed during tests'
+        }
+        if (problems) {
+            throw new GradleException("GameTest failed: ${problems.join('; ')} - see ${log}")
+        }
+        logger.lifecycle("GameTest OK: all ${expectedTests} tests passed")
+    }
+}

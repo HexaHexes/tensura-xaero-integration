@@ -1,0 +1,13 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "org.bitwisemadness.tensuraxaerointegration.mixin.worldmap",
+  "compatibilityLevel": "JAVA_21",
+  "mixins": [],
+  "client": [
+    "WorldMapHighlighterRegistryMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

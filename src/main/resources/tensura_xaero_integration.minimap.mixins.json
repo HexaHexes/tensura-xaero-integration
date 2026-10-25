@@ -1,0 +1,13 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "org.bitwisemadness.tensuraxaerointegration.mixin.minimap",
+  "compatibilityLevel": "JAVA_21",
+  "mixins": [],
+  "client": [
+    "MinimapHighlighterRegistryMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

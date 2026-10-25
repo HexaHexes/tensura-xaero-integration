@@ -1,0 +1,72 @@
+# Mod metadata file. Values written in dollar-brace form are replaced at build
+# time from gradle.properties (see generateModMetadata in build.gradle), so mod
+# identity is edited in one place only.
+# See https://docs.neoforged.net/docs/concepts/modfiles/ for the full schema.
+
+modLoader = "javafml"
+loaderVersion = "${loader_version_range}"
+license = "${mod_license}"
+
+[[mods]]
+modId = "${mod_id}"
+version = "${mod_version}"
+displayName = "${mod_name}"
+authors = "${mod_authors}"
+description = '''${mod_description}'''
+
+# Core config: no client references, so it is empty on both sides.
+[[mixins]]
+config = "${mod_id}.mixins.json"
+
+# World-map overlay registration. Client-only and only loaded when the world map
+# is installed, so the target class always exists when the mixin is applied.
+[[mixins]]
+config = "${mod_id}.worldmap.mixins.json"
+requiredMods = ["xaeroworldmap"]
+
+# Minimap overlay registration. Same rule, independently gated so a
+# minimap-only install works and a world-map-only install never loads it.
+[[mixins]]
+config = "${mod_id}.minimap.mixins.json"
+requiredMods = ["xaerominimap"]
+
+[[dependencies.${mod_id}]]
+modId = "neoforge"
+type = "required"
+versionRange = "[${neo_version},)"
+ordering = "NONE"
+side = "BOTH"
+
+[[dependencies.${mod_id}]]
+modId = "minecraft"
+type = "required"
+versionRange = "${minecraft_version_range}"
+ordering = "NONE"
+side = "BOTH"
+
+# Tensura: Reincarnated - optional. It is the only source of concentration data;
+# without it the mod has nothing to show and every feature stays inert. The
+# server-side reader is the only code that touches Tensura types.
+[[dependencies.${mod_id}]]
+modId = "tensura"
+type = "optional"
+versionRange = "[${tensura_mod_version},)"
+ordering = "AFTER"
+side = "BOTH"
+
+# Xaero's Minimap - optional, client only. Provides the minimap overlay.
+[[dependencies.${mod_id}]]
+modId = "xaerominimap"
+type = "optional"
+versionRange = "[${xaero_minimap_mod_version},)"
+ordering = "AFTER"
+side = "CLIENT"
+
+# Xaero's World Map - optional, client only. Provides the world-map overlay and
+# the chunk-hover concentration line.
+[[dependencies.${mod_id}]]
+modId = "xaeroworldmap"
+type = "optional"
+versionRange = "[${xaero_world_map_mod_version},)"
+ordering = "AFTER"
+side = "CLIENT"
