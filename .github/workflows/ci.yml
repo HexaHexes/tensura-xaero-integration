@@ -1,0 +1,253 @@
+name: CI
+
+# Three checks back the branch protection rulesets (junit, gametest,
+# version-bump): PRs cannot merge without them. The version-bump job also runs
+# on workflow_dispatch because GitHub deliberately runs no workflows for a pull
+# request raised by the default GITHUB_TOKEN - a PR it opens would otherwise sit
+# with no checks at all, and with required status checks, no way to merge but
+# admin. Its guard falls back to the default branch when there is no
+# pull_request context, so a dispatch validates exactly what the pull_request
+# run would have.
+#
+# This template is self-contained, so both build checks run from a clean
+# checkout. Mod repos derived from it resolve their dependencies through
+# CurseMaven coordinates (never gitignored libs/ or testmods/ folders) - keep
+# it that way or CI cannot run.
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  junit:
+    name: junit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+
+      - name: Build and run JUnit suite
+        run: ./gradlew build --no-daemon --stacktrace
+
+      # gradlew build reports SUCCESS when there are no test sources at all -
+      # the :test task is simply NO-SOURCE. Assert a non-zero count so the check
+      # cannot pass by running nothing.
+      - name: Assert the JUnit suite actually ran
+        run: |
+          if [ ! -d build/test-results/test ]; then
+            echo "::error::No test results directory. :test was NO-SOURCE, so nothing ran."
+            exit 1
+          fi
+
+          TOTAL=$(grep -ho 'tests="[0-9]*"' build/test-results/test/TEST-*.xml 2>/dev/null \
+                  | grep -o '[0-9]*' | awk '{s+=$1} END {print s+0}')
+          FAILED=$(grep -ho 'failures="[0-9]*"' build/test-results/test/TEST-*.xml 2>/dev/null \
+                   | grep -o '[0-9]*' | awk '{s+=$1} END {print s+0}')
+          ERRORED=$(grep -ho 'errors="[0-9]*"' build/test-results/test/TEST-*.xml 2>/dev/null \
+                    | grep -o '[0-9]*' | awk '{s+=$1} END {print s+0}')
+
+          echo "tests=$TOTAL failures=$FAILED errors=$ERRORED"
+
+          if [ "$TOTAL" -le 0 ]; then
+            echo "::error::The JUnit suite ran 0 tests. This check must not pass vacuously."
+            exit 1
+          fi
+          if [ "$FAILED" -gt 0 ] || [ "$ERRORED" -gt 0 ]; then
+            echo "::error::JUnit suite reported $FAILED failures and $ERRORED errors."
+            exit 1
+          fi
+          echo "JUnit suite ran $TOTAL tests, all passing."
+
+      - name: Upload jar
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: jar
+          path: build/libs/*.jar
+          if-no-files-found: ignore
+          retention-days: 7
+
+  gametest:
+    name: gametest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+
+      # The exit code of this task is NOT a reliable pass signal. A run that
+      # printed "Failed to start the minecraft server" and executed zero tests
+      # still returned BUILD SUCCESSFUL. The success line in the log is the
+      # only trustworthy signal, so this step never decides the job outcome.
+      - name: Run GameTest server
+        run: |
+          set +e
+          ./gradlew runGameTestServer --no-daemon 2>&1 | tee gametest.log
+          echo "gradle exit code: $?" >> gametest.log
+
+      - name: Assert GameTests ran and passed
+        run: |
+          # The server prints "All 0 required tests passed :)" when the tree
+          # carries no GameTests at all, so matching the phrase alone lets this
+          # check pass while verifying nothing. The count is what makes it real.
+          LINE=$(grep -E "All [0-9]+ required tests passed" gametest.log || true)
+
+          if [ -z "$LINE" ]; then
+            echo "::error::GameTest run never reported a result. The task exit code is not reliable, so this assertion is authoritative."
+            echo "--- last 120 lines ---"
+            tail -120 gametest.log
+            exit 1
+          fi
+
+          # Anchor on "All N" rather than grabbing the first number on the line:
+          # the line begins with a timestamp, so a bare [0-9]+ match returns the
+          # hour and the guard would never trip.
+          COUNT=$(echo "$LINE" | sed -E 's/.*All ([0-9]+) required tests passed.*/\1/')
+
+          if [ "$COUNT" -le 0 ]; then
+            echo "::error::GameTest server ran 0 tests. This tree carries no @GameTest methods, so the check would be passing vacuously."
+            exit 1
+          fi
+
+          echo "GameTests reported success: $COUNT tests passed."
+
+      - name: Upload GameTest log
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: gametest-log
+          path: gametest.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+  version-bump:
+    name: version-bump
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Enforce version bump rules
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.repository.default_branch }}
+          HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+
+          NEW_VERSION=$(grep '^mod_version=' gradle.properties | cut -d= -f2 | tr -d '[:space:]')
+          OLD_VERSION=$(git show "$BASE:gradle.properties" | grep '^mod_version=' | cut -d= -f2 | tr -d '[:space:]')
+
+          echo "base mod_version: $OLD_VERSION"
+          echo "head mod_version: $NEW_VERSION"
+
+          CHANGED=$(git diff --name-only "$BASE" "$HEAD")
+          echo "--- changed files ---"
+          echo "$CHANGED"
+
+          if [ "$NEW_VERSION" = "$OLD_VERSION" ]; then
+            echo "No version bump. This PR builds as an alpha (nightly). OK."
+            exit 0
+          fi
+
+          case "$NEW_VERSION" in
+            *-alpha*|*-Alpha*|*-ALPHA*) CHANNEL="alpha" ;;
+            *-*) CHANNEL="beta" ;;
+            *) CHANNEL="stable" ;;
+          esac
+
+          echo "detected channel: $CHANNEL"
+
+          if [ "$CHANNEL" = "alpha" ]; then
+            echo "Alpha version bump. Bundling other changes is permitted. OK."
+            exit 0
+          fi
+
+          EXTRA=$(echo "$CHANGED" | grep -v '^gradle\.properties$' | grep -v '^$' || true)
+          if [ -n "$EXTRA" ]; then
+            echo "::error::A $CHANNEL version bump must change gradle.properties and nothing else."
+            echo "::error::These files must not accompany a $CHANNEL bump:"
+            echo "$EXTRA"
+            echo "::error::Either split the version bump into its own PR, or use an -alpha suffix to bundle it with the work."
+            exit 1
+          fi
+
+          echo "Isolated $CHANNEL version bump. OK."
+
+      - name: Enforce breaking changes require a major or minor bump
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE: ${{ github.event.pull_request.base.sha || github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+
+          NEW_VERSION=$(grep '^mod_version=' gradle.properties | cut -d= -f2 | tr -d '[:space:]')
+          OLD_VERSION=$(git show "$BASE:gradle.properties" | grep '^mod_version=' | cut -d= -f2 | tr -d '[:space:]')
+
+          if [ "$NEW_VERSION" = "$OLD_VERSION" ]; then
+            echo "No version bump. Magnitude rule does not apply."
+            exit 0
+          fi
+
+          case "$NEW_VERSION" in
+            *-*) SUFFIXED="yes" ;;
+            *)   SUFFIXED="no" ;;
+          esac
+
+          if [ "$SUFFIXED" = "yes" ]; then
+            echo "Pre-release bump. Magnitude rule applies to the next clean bump, not this one."
+            exit 0
+          fi
+
+          BASELINE=$(git tag --list 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1 || true)
+
+          if [ -z "$BASELINE" ]; then
+            echo "No stable tag exists yet. Nothing to be compatible with. OK."
+            exit 0
+          fi
+
+          echo "last stable tag: $BASELINE"
+
+          BREAKING=$(gh pr list --state merged --label breaking --search "merged:>=$(git log -1 --format=%cI "$BASELINE")" --json number --jq '.[].number' || true)
+
+          if [ -z "$BREAKING" ]; then
+            echo "No breaking PRs merged since $BASELINE. Any bump is permitted. OK."
+            exit 0
+          fi
+
+          echo "breaking PRs since $BASELINE: $BREAKING"
+
+          OLD_BASE="${BASELINE#v}"
+          MAJOR_OLD=$(echo "$OLD_BASE" | cut -d. -f1)
+          MINOR_OLD=$(echo "$OLD_BASE" | cut -d. -f2)
+          MAJOR_NEW=$(echo "$NEW_VERSION" | cut -d. -f1)
+          MINOR_NEW=$(echo "$NEW_VERSION" | cut -d. -f2)
+
+          if [ "$MAJOR_NEW" -gt "$MAJOR_OLD" ] || [ "$MINOR_NEW" -gt "$MINOR_OLD" ]; then
+            echo "Bump $OLD_BASE -> $NEW_VERSION raises major or minor. OK."
+            exit 0
+          fi
+
+          echo "::error::Breaking changes are outstanding since $BASELINE (PRs: $BREAKING)."
+          echo "::error::A breaking change cannot ship in a patch release."
+          echo "::error::Bump $OLD_BASE to a higher major or minor version, not $NEW_VERSION."
+          exit 1
