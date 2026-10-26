@@ -84,6 +84,10 @@ jobs:
   gametest:
     name: gametest
     runs-on: ubuntu-latest
+    # The Gradle task kills a run that exceeds its own 240 s limit; this is the
+    # backstop for a hang that survives that (a wedged Gradle daemon, a step
+    # waiting on a pipe). A healthy run is under a minute.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
 

@@ -10,7 +10,7 @@ export JAVA_HOME="/c/Program Files/Java/jdk-21"   # JDK 21 must be explicit on t
 
 ./gradlew build                  # compile + JUnit suite + jar
 ./gradlew test                   # JUnit suite only
-./gradlew runGameTestServer      # headless GameTest server (5 tests)
+./gradlew runGameTestServer      # headless GameTest server (6 tests)
 ```
 
 `runGameTestServer` is graded by the build script on the `All N required tests
@@ -19,10 +19,29 @@ GameTest server that executes zero tests still exits successfully. `expectedTest
 in `build.gradle` must equal the number of `@GameTest` methods in
 `src/gametest/java/.../ConcentrationGameTests.java` — currently `6`.
 
-If a run sits at the `[ ++++ ]` progress line and never prints the summary, the
-dev run directory is stale rather than a test failing: delete `run/world` and run
-again. This was observed once locally and did not reproduce after clearing it; the
-CI job starts from a clean checkout, so it cannot hit it.
+### When the harness wedges
+
+A healthy run takes about 30–45 s including mod loading. Occasionally the server
+registers its tests (`N tests are now running`) and then never advances: it prints
+an empty `[      ]` progress line every few milliseconds, logs no error of any
+kind, and does not stop. The last such run produced 380 000 progress lines in
+eleven minutes, with successive lines 5–10 ms apart — the tick loop was spinning
+at roughly 150 tps and re-printing the bar, not deadlocked. A rerun has always
+cleared it; delete `run/world` if it survives one retry.
+
+The task is therefore killed on a wall-clock timeout (`240 s` by default,
+`-PgametestTimeoutSeconds=...` to override), so a wedge fails the build in four
+minutes instead of waiting for a human to notice. When that happens, the
+`reportGametestStall` finalizer says which case it was:
+
+```
+GameTest was stopped after 240s with its tests registered but none completed -
+the harness wedged, not the tests.
+```
+
+A run killed before its tests register prints nothing extra; both cases fail the
+build, and the CI `gametest` job is capped at 15 minutes as a backstop for a hang
+that outlives the Gradle timeout.
 
 ## 2. Latest results (2026-10-25, local, Windows / Git Bash)
 
