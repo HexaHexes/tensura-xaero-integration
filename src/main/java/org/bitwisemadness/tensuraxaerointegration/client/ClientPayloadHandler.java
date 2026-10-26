@@ -20,8 +20,14 @@ public final class ClientPayloadHandler {
         ClientConcentration.get().accept(payload);
     }
 
-    public static void onBaseline(double baseline) {
-        ClientConcentration.get().store().setBaseline(baseline);
+    public static void onServerInfo(double baseline, int refreshIntervalTicks) {
+        ClientConcentrationStore store = ClientConcentration.get().store();
+        // Applied before the baseline so the freshness window is already the
+        // server's when anything classifies against it.
+        if (refreshIntervalTicks > 0) {
+            store.setServerRefreshInterval(refreshIntervalTicks);
+        }
+        store.setBaseline(baseline);
         // Logged once per session on purpose: a baseline the server could not
         // read silently removes every band, and with them the whole overlay, so
         // it has to be visible in a bug report rather than inferred.
@@ -30,9 +36,12 @@ public final class ClientPayloadHandler {
             if (Double.isNaN(baseline)) {
                 TensuraXaeroIntegration.LOGGER.warn(
                         "Server could not report Tensura's baseline; classifying against the configured fallback ({})",
-                        ClientConcentration.get().store().effectiveBaseline());
+                        store.effectiveBaseline());
             } else {
-                TensuraXaeroIntegration.LOGGER.info("Tensura baseline for this world: {}", baseline);
+                TensuraXaeroIntegration.LOGGER.info(
+                        "Tensura baseline for this world: {} (server confirms chunks every {} ticks, "
+                                + "so values count as current for {} ticks)",
+                        baseline, store.serverRefreshIntervalTicks(), store.staleAfterTicks());
             }
         }
     }

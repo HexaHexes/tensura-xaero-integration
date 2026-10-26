@@ -117,7 +117,10 @@ public final class ClientConcentration {
         this.ticks++;
 
         if (this.ticks % MAINTENANCE_INTERVAL_TICKS == 0) {
-            store().expire(ClientConfig.staleAfterTicks());
+            // The window follows the server's own confirmation cadence, so it can
+            // never be shorter than the server's heartbeat or longer than the
+            // server's promise to keep a chunk current.
+            store().expire(store().staleAfterTicks());
         }
         if (this.ticks - this.lastSaveTick >= SAVE_INTERVAL_TICKS) {
             this.lastSaveTick = this.ticks;

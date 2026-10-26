@@ -99,9 +99,14 @@ Responsibilities:
   some player subscribed to that chunk, and then offers the current value to each
   such player's queue. No packet is built per chunk; the queue is flushed once
   per tick.
-- **Periodic path.** `onServerTick` pushes the baseline when it is due
-  (600 ticks) or pending, prunes subscriptions that left the player's dimension
-  or radius, runs `reconcile` every `reconcileIntervalTicks`, and flushes.
+- **Periodic path.** `onServerTick` pushes the `ServerInfoPayload` (baseline and
+  refresh cadence) when it is due (600 ticks) or pending, prunes subscriptions
+  that left the player's dimension or radius, runs `reconcile` every
+  `reconcileIntervalTicks`, runs the heartbeat, and flushes.
+- **Heartbeat.** A chunk parked at its ceiling never changes, so change-gated
+  sending alone would leave it sounding stale on the client. `refreshUnchanged`
+  re-reads and re-sends an unchanged value once its last send is
+  `refreshIntervalTicks` old, bounded like reconciliation.
 - **Bounded work.** `reconcile` re-reads at most `reconcileBudgetChunksPerPlayer`
   entries per cycle from a rotating cursor, so a player with 2 000 subscriptions
   costs a few hundred field reads every few seconds rather than a stall.
@@ -116,8 +121,9 @@ Responsibilities:
   chunk positions. Packets are capped at `NetworkLimits.MAX_SUBSCRIBE_CHUNKS`.
 - `ConcentrationPayload` (S2C): dimension id, `long[]` positions, `double[]`
   values, `NaN` meaning "no authoritative value right now".
-- `BaselinePayload` (S2C): the server's configured baseline, so clients do not
-  have to guess it.
+- `ServerInfoPayload` (S2C): the server's configured baseline and its
+  `refreshIntervalTicks`, so clients neither guess the baseline nor keep a
+  second, independent freshness number that could disagree with the server.
 - `PackedChunkPos`: `(x << 32) | (z & 0xFFFFFFFFL)` with sign-safe unpacking.
 
 ## 4. Client components
@@ -127,7 +133,8 @@ The session owner. On every client tick it:
 
 1. detects a world or dimension change and starts a new session (clearing the
    store, releasing the old dimension's subscriptions);
-2. ticks the store, and every 20 ticks expires stale entries and purges old ones;
+2. ticks the store, and every 20 ticks expires values past the freshness window
+   the server's cadence implies (twice its `refreshIntervalTicks`);
 3. re-declares its mapped set every `subscribeIntervalTicks` (and every 200 ticks
    re-sends the whole set, which is idempotent and self-healing against a server
    radius cap smaller than the client's);
@@ -141,7 +148,8 @@ requested.
 ### `client/ClientConcentrationStore`
 Pure, Minecraft-free store (`ChunkCacheKey` → entry) with two display states.
 
-A value is either **live** (the server reported it within `staleAfterTicks`) or
+A value is either **live** (the server confirmed it within the freshness window,
+which is twice the server's announced `refreshIntervalTicks`) or
 **last known** (a real earlier observation that is no longer being refreshed).
 `observe(...)` returns one `Observation` carrying the value, its band and which
 of the two it is; the renderers and the hover line never look at the raw entry.
@@ -150,7 +158,7 @@ The four rules that make this safe:
 - `offer(key, mapped, value)` **refuses the write when `mapped` is false**, so an
   unmapped chunk can never enter the cache even if a packet named it.
 - `demote(key)` keeps the number but drops it to last-known, and `expire()` does
-  the same for anything past `staleAfterTicks`. Demotion is a visible change, so
+  the same for anything past that window. Demotion is a visible change, so
   it bumps the region version exactly once - the map repaints from bright to dim
   without repainting again every sweep.
 - `markUnavailable(key, mapped)` demotes rather than deletes: when the server
@@ -180,7 +188,7 @@ A row in the file is trusted to be a mapped chunk by construction: only the
 mapped-only ingress ever writes one, and Xaero does not un-map a chunk.
 
 ### `client/ClientPayloadHandler`
-Dispatches `ConcentrationPayload` and `BaselinePayload` on the client thread via
+Dispatches `ConcentrationPayload` and `ServerInfoPayload` on the client thread via
 `enqueueWork`, then hands them to `ClientConcentration`. No world access happens
 on the network thread.
 
@@ -242,7 +250,7 @@ world-map-only install loads only what exists.
 | `concentration/ConcentrationThresholds` | baseline-relative band boundaries, validated to increase |
 | `concentration/ConcentrationClassification` | the five presentation bands |
 | `concentration/OverlayPalette` | `#RRGGBB` parsing, per-band ARGB in Xaero's encoding |
-| `refresh/UpdateQueue` | change detection, per-chunk minimum interval, bounded drain, retention pruning |
+| `refresh/UpdateQueue` | change detection, per-chunk minimum interval, heartbeat re-queue, bounded drain, retention pruning |
 | `refresh/ReconcileCursor` | rotating bounded slice over a set |
 | `cache/ConcentrationFileFormat` | strict binary codec for the persisted last-known values |
 | `client/ClientConcentrationStore` | mapped-only ingress, live/last-known states, replay, region versions |

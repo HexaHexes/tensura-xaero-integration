@@ -14,7 +14,7 @@ import net.neoforged.neoforge.network.registration.PayloadRegistrar;
 public final class Network {
 
     /** Protocol version; bump alongside any payload shape change. */
-    private static final String PROTOCOL_VERSION = "1";
+    private static final String PROTOCOL_VERSION = "2";
 
     private Network() {
     }
@@ -30,8 +30,8 @@ public final class Network {
                 ConcentrationPayload.STREAM_CODEC,
                 ConcentrationPayload::handle);
         registrar.playToClient(
-                BaselinePayload.TYPE,
-                BaselinePayload.STREAM_CODEC,
-                BaselinePayload::handle);
+                ServerInfoPayload.TYPE,
+                ServerInfoPayload.STREAM_CODEC,
+                ServerInfoPayload::handle);
     }
 }

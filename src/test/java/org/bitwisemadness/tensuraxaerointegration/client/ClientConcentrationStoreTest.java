@@ -134,6 +134,63 @@ class ClientConcentrationStoreTest {
     }
 
     @Test
+    void the_freshness_window_follows_the_server_refresh_interval() {
+        ClientConcentrationStore store = newStore();
+        assertEquals(2L * ClientConcentrationStore.DEFAULT_SERVER_REFRESH_INTERVAL_TICKS, store.staleAfterTicks(),
+                "the shipped cadence is assumed until the server announces its own");
+
+        store.setServerRefreshInterval(1200);
+        assertEquals(2400L, store.staleAfterTicks(), "a slow server buys its values a longer window");
+
+        store.setServerRefreshInterval(20);
+        assertEquals(ClientConcentrationStore.MIN_STALE_TICKS, store.staleAfterTicks(),
+                "a fast server must not make values flicker between live and last known");
+    }
+
+    @Test
+    void a_slow_server_no_longer_dims_a_value_the_old_fixed_window_would_have_expired() {
+        ClientConcentrationStore store = newStore();
+        store.setServerRefreshInterval(1200);
+        store.offer(CHUNK, true, 600.0);
+
+        for (int i = 0; i < 1000; i++) {
+            store.tick();
+        }
+        store.expire(store.staleAfterTicks());
+        assertTrue(observe(store, CHUNK, store.staleAfterTicks()).orElseThrow().live(),
+                "1000 ticks is inside this server's 2400-tick window");
+
+        for (int i = 0; i < 1500; i++) {
+            store.tick();
+        }
+        store.expire(store.staleAfterTicks());
+        assertFalse(observe(store, CHUNK, store.staleAfterTicks()).orElseThrow().live(),
+                "past two confirmations the value is honestly last known");
+    }
+
+    @Test
+    void an_invalid_refresh_interval_is_rejected() {
+        ClientConcentrationStore store = newStore();
+        for (int invalid : new int[] {0, -1}) {
+            try {
+                store.setServerRefreshInterval(invalid);
+                throw new AssertionError("a non-positive interval must be rejected, was " + invalid);
+            } catch (IllegalArgumentException expected) {
+                // expected
+            }
+        }
+    }
+
+    @Test
+    void clearing_the_baseline_forgets_the_server_cadence_too() {
+        ClientConcentrationStore store = newStore();
+        store.setServerRefreshInterval(1200);
+        store.clearBaseline();
+        assertEquals(ClientConcentrationStore.DEFAULT_SERVER_REFRESH_INTERVAL_TICKS,
+                store.serverRefreshIntervalTicks(), "another world must not inherit this server's policy");
+    }
+
+    @Test
     void a_heartbeat_of_unchanged_values_keeps_a_settled_chunk_live() {
         ClientConcentrationStore store = newStore();
         store.offer(CHUNK, true, 600.0);

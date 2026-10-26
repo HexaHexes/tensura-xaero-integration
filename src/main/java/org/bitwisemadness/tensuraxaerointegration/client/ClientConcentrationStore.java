@@ -44,6 +44,27 @@ public final class ClientConcentrationStore {
     /** Fixed region geometry, matching Xaero's 32x32-chunk map regions. */
     public static final int REGION_SHIFT = 5;
 
+    /**
+     * Confirmation cadence assumed until the server reports its own.
+     *
+     * <p>Matches the shipped {@code refresh.refreshIntervalTicks}, so a server
+     * that never announces its cadence (or a client that joined before the packet
+     * arrived) still treats values the way that server does.</p>
+     */
+    public static final int DEFAULT_SERVER_REFRESH_INTERVAL_TICKS = 200;
+
+    /**
+     * Floor for the derived freshness window, so a server that confirms very
+     * often cannot make values flicker between live and last known.
+     */
+    public static final long MIN_STALE_TICKS = 100;
+
+    /**
+     * How many confirmation intervals a value stays current for. Two tolerates one
+     * missed heartbeat before the value is demoted.
+     */
+    private static final long STALE_INTERVALS = 2L;
+
     /** A value as the renderers and hover line should see it. */
     public record Observation(double value, Optional<ConcentrationClassification> classification, boolean live) {
 
@@ -77,6 +98,7 @@ public final class ClientConcentrationStore {
     private long tick;
     private double baseline = Double.NaN;
     private double fallbackBaseline = Double.NaN;
+    private int serverRefreshIntervalTicks = DEFAULT_SERVER_REFRESH_INTERVAL_TICKS;
 
     public ClientConcentrationStore(int maxEntries) {
         this.cache = new ConcentrationCache(maxEntries);
@@ -128,6 +150,35 @@ public final class ClientConcentrationStore {
             return this.baseline;
         }
         return this.fallbackBaseline;
+    }
+
+    /**
+     * Records how often the server re-confirms an unchanged chunk.
+     *
+     * <p>This is what the freshness window is derived from, so there is no second
+     * client-side number that could disagree with the server: values are trusted
+     * for exactly as long as the server's own cadence justifies.</p>
+     *
+     * @param ticks the server's confirmation interval, positive
+     */
+    public void setServerRefreshInterval(int ticks) {
+        if (ticks <= 0) {
+            throw new IllegalArgumentException("server refresh interval must be positive, was " + ticks);
+        }
+        this.serverRefreshIntervalTicks = ticks;
+    }
+
+    /** The confirmation cadence currently in force, in client ticks. */
+    public int serverRefreshIntervalTicks() {
+        return this.serverRefreshIntervalTicks;
+    }
+
+    /**
+     * How long a value counts as current, derived from the server's confirmation
+     * cadence: {@code 2 * refreshIntervalTicks}, floored at {@link #MIN_STALE_TICKS}.
+     */
+    public long staleAfterTicks() {
+        return Math.max(MIN_STALE_TICKS, STALE_INTERVALS * this.serverRefreshIntervalTicks);
     }
 
     /**
@@ -316,9 +367,15 @@ public final class ClientConcentrationStore {
         // a dimension change; clearBaseline() is for world changes and disconnects.
     }
 
-    /** Forgets the server-supplied baseline, e.g. on disconnect or world change. */
+    /**
+     * Forgets the server-supplied baseline, e.g. on disconnect or world change.
+     *
+     * <p>The confirmation cadence is reset with it: it is that server's policy,
+     * and a different world must not inherit it. The next join announces it again.</p>
+     */
     public void clearBaseline() {
         this.baseline = Double.NaN;
+        this.serverRefreshIntervalTicks = DEFAULT_SERVER_REFRESH_INTERVAL_TICKS;
     }
 
     public int size() {

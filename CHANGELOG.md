@@ -4,6 +4,27 @@ All notable changes to this project. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses
 semantic versioning with pre-release suffixes.
 
+## [0.1.0-alpha.5] — 2026-10-26
+
+One freshness rule instead of two: the client's "still current" window now comes
+from the server's own refresh cadence.
+
+### Changed
+
+- **`freshness.staleAfterTicks` is gone from the client config.** It could not be
+  right in general: the client has no way to know how often a given server will
+  confirm a chunk, so a hand-tuned number either dimmed values the server was
+  still sending or kept claiming currency for values it had stopped sending. The
+  window is now twice the server's `refresh.refreshIntervalTicks` (floored at 100
+  ticks), so raising the server's interval keeps values current for longer with
+  no client edit. Anything left over in an existing config file is ignored.
+- `BaselinePayload` became `ServerInfoPayload`, carrying the baseline **and** the
+  refresh interval. Protocol version is now 2, so a mismatched client and server
+  refuse each other instead of decoding garbage.
+- The join log line now names the cadence in force: `Tensura baseline for this
+  world: 500.0 (server confirms chunks every 200 ticks, so values count as
+  current for 400 ticks)`.
+
 ## [0.1.0-alpha.4] — 2026-10-26
 
 Settled chunks staying bright: an unchanged concentration is confirmed again

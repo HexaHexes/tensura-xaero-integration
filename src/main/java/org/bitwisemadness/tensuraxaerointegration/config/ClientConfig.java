@@ -40,7 +40,6 @@ public final class ClientConfig {
 
     private static final ModConfigSpec.DoubleValue FALLBACK_BASELINE;
 
-    private static final ModConfigSpec.IntValue STALE_AFTER_TICKS;
     private static final ModConfigSpec.DoubleValue HISTORICAL_OPACITY_SCALE;
     private static final ModConfigSpec.BooleanValue PERSISTENCE_ENABLED;
     private static final ModConfigSpec.IntValue PERSISTED_ENTRIES_MAX;
@@ -105,12 +104,11 @@ public final class ClientConfig {
         builder.pop();
 
         builder.push("freshness");
-        STALE_AFTER_TICKS = builder
-                .comment("How long a value counts as current. After this many client ticks")
-                .comment("without a refresh the chunk keeps its last known value, drawn dimmer")
-                .comment("and labelled as last known, instead of pretending to be current.")
-                .comment("600 ticks is 30 seconds at 20 tps.")
-                .defineInRange("staleAfterTicks", 600, 20, 24000);
+        builder.comment("How long a value counts as current is NOT set here: it is derived from")
+                .comment("the server's own refresh interval (twice that interval), so the two")
+                .comment("cannot disagree. A value past that window keeps its number, is drawn")
+                .comment("dimmer and is labelled last known. The server's interval is logged on")
+                .comment("join.");
         HISTORICAL_OPACITY_SCALE = builder
                 .comment("Opacity multiplier for a last known value, relative to its band.")
                 .comment("0 hides remembered values on the map (they still answer the hover")
@@ -178,10 +176,6 @@ public final class ClientConfig {
 
     public static double fallbackBaseline() {
         return FALLBACK_BASELINE.get();
-    }
-
-    public static int staleAfterTicks() {
-        return STALE_AFTER_TICKS.get();
     }
 
     /** How bright a last-known value is drawn, as a fraction of its band's opacity. */

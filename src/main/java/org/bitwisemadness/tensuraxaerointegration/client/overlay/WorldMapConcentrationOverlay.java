@@ -8,6 +8,7 @@ import net.minecraft.world.level.Level;
 import org.bitwisemadness.tensuraxaerointegration.TensuraXaeroIntegration;
 import org.bitwisemadness.tensuraxaerointegration.cache.RegionKey;
 import org.bitwisemadness.tensuraxaerointegration.client.ClientConcentration;
+import org.bitwisemadness.tensuraxaerointegration.client.ClientConcentrationStore;
 import org.bitwisemadness.tensuraxaerointegration.client.ClientConcentrationStore.Observation;
 import org.bitwisemadness.tensuraxaerointegration.client.HoverText;
 import org.bitwisemadness.tensuraxaerointegration.config.ClientConfig;
@@ -120,9 +121,10 @@ public final class WorldMapConcentrationOverlay extends ChunkHighlighter {
     }
 
     private static Optional<Observation> observation(ResourceKey<Level> dimension, int chunkX, int chunkZ) {
-        return ClientConcentration.get().store().observe(
+        ClientConcentrationStore store = ClientConcentration.get().store();
+        return store.observe(
                 ClientConcentration.get().key(dimension, chunkX, chunkZ),
-                ClientConfig.staleAfterTicks(),
+                store.staleAfterTicks(),
                 ClientConfig.thresholds());
     }
 

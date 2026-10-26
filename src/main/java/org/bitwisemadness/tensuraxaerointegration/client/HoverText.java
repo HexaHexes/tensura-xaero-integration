@@ -33,7 +33,7 @@ public final class HoverText {
         ChunkCacheKey key = new ChunkCacheKey(token.isBlank() ? "unknown" : token, dimensionId, chunkX, chunkZ);
 
         Optional<Observation> observation =
-                store.observe(key, ClientConfig.staleAfterTicks(), ClientConfig.thresholds());
+                store.observe(key, store.staleAfterTicks(), ClientConfig.thresholds());
         if (observation.isEmpty()) {
             return null;
         }

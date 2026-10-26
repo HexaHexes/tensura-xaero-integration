@@ -5,6 +5,7 @@ import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.level.Level;
 import org.bitwisemadness.tensuraxaerointegration.cache.RegionKey;
 import org.bitwisemadness.tensuraxaerointegration.client.ClientConcentration;
+import org.bitwisemadness.tensuraxaerointegration.client.ClientConcentrationStore;
 import org.bitwisemadness.tensuraxaerointegration.client.ClientConcentrationStore.Observation;
 import org.bitwisemadness.tensuraxaerointegration.config.ClientConfig;
 import xaero.common.minimap.highlight.ChunkHighlighter;
@@ -72,9 +73,10 @@ public final class MinimapConcentrationOverlay extends ChunkHighlighter {
         if (!ClientConfig.minimapOverlayEnabled()) {
             return Optional.empty();
         }
-        return ClientConcentration.get().store().observe(
+        ClientConcentrationStore store = ClientConcentration.get().store();
+        return store.observe(
                 ClientConcentration.get().key(dimension, chunkX, chunkZ),
-                ClientConfig.staleAfterTicks(),
+                store.staleAfterTicks(),
                 ClientConfig.thresholds());
     }
 }

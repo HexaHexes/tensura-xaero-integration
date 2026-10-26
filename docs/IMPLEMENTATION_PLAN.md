@@ -64,7 +64,7 @@ Depends on: Phase 3.
 
 - [x] `net/SubscriptionPayload` (C2S) with batched packed chunk positions and subscribe flag.
 - [x] `net/ConcentrationPayload` (S2C) with packed positions + values (`NaN` = unavailable).
-- [x] `net/BaselinePayload` (S2C) carrying the authoritative baseline.
+- [x] `net/ServerInfoPayload` (S2C) carrying the authoritative baseline and the server's refresh cadence.
 - [x] `server/ConcentrationServer`: per-player subscriptions, radius/loaded validation,
       dedupe, change-only updates, bounded reconciliation, flush-per-tick batching,
       logout cleanup, world-unload cleanup.

@@ -21,9 +21,9 @@ import net.neoforged.neoforge.network.PacketDistributor;
 import org.bitwisemadness.tensuraxaerointegration.TensuraXaeroIntegration;
 import org.bitwisemadness.tensuraxaerointegration.cache.ChunkCacheKey;
 import org.bitwisemadness.tensuraxaerointegration.config.ServerConfig;
-import org.bitwisemadness.tensuraxaerointegration.net.BaselinePayload;
 import org.bitwisemadness.tensuraxaerointegration.net.ConcentrationPayload;
 import org.bitwisemadness.tensuraxaerointegration.net.PackedChunkPos;
+import org.bitwisemadness.tensuraxaerointegration.net.ServerInfoPayload;
 import org.bitwisemadness.tensuraxaerointegration.net.SubscriptionPayload;
 import org.bitwisemadness.tensuraxaerointegration.refresh.ReconcileCursor;
 import org.bitwisemadness.tensuraxaerointegration.refresh.UpdateQueue;
@@ -56,8 +56,8 @@ public final class ConcentrationServer {
 
     private static final ConcentrationServer INSTANCE = new ConcentrationServer();
 
-    /** How often the authoritative baseline is re-sent to every player. */
-    private static final int BASELINE_REFRESH_INTERVAL_TICKS = 600;
+    /** How often the baseline and refresh cadence are re-sent to every player. */
+    private static final int SERVER_INFO_REFRESH_INTERVAL_TICKS = 600;
 
     /** Retry delay while Tensura's baseline cannot be read at all. */
     private static final int BASELINE_RETRY_TICKS = 100;
@@ -220,15 +220,15 @@ public final class ConcentrationServer {
         }
         int now = server.getTickCount();
         boolean enabled = ServerConfig.syncEnabled();
-        boolean sendBaseline = now - this.lastBaselineTick >= BASELINE_REFRESH_INTERVAL_TICKS;
-        if (sendBaseline) {
+        boolean sendServerInfo = now - this.lastBaselineTick >= SERVER_INFO_REFRESH_INTERVAL_TICKS;
+        if (sendServerInfo) {
             this.lastBaselineTick = now;
         }
         double baseline = readOrNaN(TensuraBridge.baseline());
         if (Double.isNaN(baseline)) {
             // Tensura's config can be unreadable for a moment; retry soon rather
             // than leaving clients without a baseline for the full interval.
-            this.lastBaselineTick = now - BASELINE_REFRESH_INTERVAL_TICKS + BASELINE_RETRY_TICKS;
+            this.lastBaselineTick = now - SERVER_INFO_REFRESH_INTERVAL_TICKS + BASELINE_RETRY_TICKS;
         }
 
         for (PlayerState state : this.players.values()) {
@@ -241,8 +241,11 @@ public final class ConcentrationServer {
                 state.queue.clear();
                 continue;
             }
-            if (state.baselinePending || sendBaseline) {
-                PacketDistributor.sendToPlayer(player, new BaselinePayload(baseline));
+            if (state.baselinePending || sendServerInfo) {
+                // The heartbeat cadence travels with the baseline: the client derives
+                // its freshness window from it, so the two cannot drift apart.
+                PacketDistributor.sendToPlayer(player,
+                        new ServerInfoPayload(baseline, ServerConfig.refreshIntervalTicks()));
                 state.baselinePending = false;
             }
             pruneIneligible(player, state);
