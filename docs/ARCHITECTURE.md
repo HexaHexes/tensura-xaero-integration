@@ -285,7 +285,7 @@ world-map-only install loads only what exists.
 | --- | --- |
 | `cache/ChunkCacheKey` | world token + dimension + chunk x/z; the only identity used for data |
 | `cache/ConcentrationEntry` | value, mapped flag, timestamps, staleness |
-| `cache/ConcentrationCache` | bounded map with LRU-ish eviction and invalidation |
+| `cache/ConcentrationCache` | bounded map, recency by write (reads are read-only), live-key expiry sweep |
 | `cache/RegionKey` | 32×32-chunk region identity used for repaint invalidation |
 | `concentration/ConcentrationThresholds` | baseline-relative band boundaries, validated to increase (the server's ladder, from the datapack) |
 | `tiers/DimensionTier` | one dimension's normal concentration and band ladder |
@@ -300,6 +300,18 @@ world-map-only install loads only what exists.
 | `util/ChunkRadius` | the circular request radius, shared by the client's request and the server's cap |
 | `cache/ConcentrationFileFormat` | strict binary codec for the persisted last-known values |
 | `client/ClientConcentrationStore` | mapped-only ingress, live/last-known states, replay, region versions |
+
+The store's read path is shaped by who calls it: two Xaero highlighters ask
+`chunkIsHighlit` and `getColors` for every visible chunk on every frame, from the
+map's render threads. So `hasValue` answers "paint or not" without building an
+observation, `ClientConcentration.dimensionIdOf` memoises the one dimension string
+a frame needs, `ConcentrationClassification.byCode` returns the constant instead
+of an `Optional`, and `ClientConfig.palette` memoises the resolved palette until
+the config reloads or the server sends a different one (each of those was
+previously rebuilt per chunk, with eight config lookups). Expiry is a sweep over
+the cache's *live* keys rather than a snapshot of the whole map: most of a long
+session's cache is remembered history that can never expire, and copying it every
+second held the lock the renderer needs.
 
 These carry the logic that the specification cares about, which is why the JUnit
 suite can cover it without a game client.

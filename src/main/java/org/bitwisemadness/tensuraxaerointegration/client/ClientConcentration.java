@@ -128,10 +128,37 @@ public final class ClientConcentration {
         return this.dimensionId;
     }
 
+    /**
+     * The last dimension asked about, with its id. Published as one immutable value
+     * so a render thread can never pair one dimension's key with another's id.
+     */
+    private record DimensionMemo(ResourceKey<Level> dimension, String id) {
+    }
+
+    /** One entry is enough: a map asks for thousands of chunks of one dimension. */
+    private volatile DimensionMemo dimensionMemo;
+
     /** Builds the cache key for a chunk in a dimension, scoped to this session's world. */
     public ChunkCacheKey key(ResourceKey<Level> dimension, int chunkX, int chunkZ) {
         String token = this.worldToken.isBlank() ? "unknown" : this.worldToken;
-        return new ChunkCacheKey(token, dimension.location().toString(), chunkX, chunkZ);
+        return new ChunkCacheKey(token, dimensionIdOf(dimension), chunkX, chunkZ);
+    }
+
+    /**
+     * The dimension id this mod keys chunks by, memoised.
+     *
+     * <p>{@code location().toString()} builds a new String on every call, and the
+     * map highlighters ask for a chunk key per visible chunk per frame. A map
+     * draws one dimension at a time, so a single remembered entry covers it.</p>
+     */
+    public String dimensionIdOf(ResourceKey<Level> dimension) {
+        DimensionMemo memo = this.dimensionMemo;
+        if (memo != null && (memo.dimension() == dimension || memo.dimension().equals(dimension))) {
+            return memo.id();
+        }
+        String id = dimension.location().toString();
+        this.dimensionMemo = new DimensionMemo(dimension, id);
+        return id;
     }
 
     /** Drives staleness, subscription diffing and map invalidation. */

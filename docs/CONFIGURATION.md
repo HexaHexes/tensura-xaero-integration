@@ -105,7 +105,7 @@ number is never discarded by it, only relabelled.
 | Key | Default | Effect |
 | --- | --- | --- |
 | `enabled` | `true` | Remember concentrations between sessions, per world, so chunks that are no longer loaded still show what was last observed there. |
-| `maxEntriesPerWorld` | `20000` | Most chunks remembered per world; bounds both the file and memory. Least recently seen chunks are dropped first. `0` disables remembering without touching the switch. |
+| `maxEntriesPerWorld` | `20000` | Most chunks remembered per world; bounds both the file and memory. Chunks the server has not confirmed for longest are dropped first — reading a value off the map does not protect it, because the map is redrawn per frame and would otherwise decide what survives. `0` disables remembering without touching the switch. |
 
 History lives in `<game directory>/tensura_xaero_integration/<world>-<hash>.bin`,
 separate per world and including every dimension. Only chunks your maps have

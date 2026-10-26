@@ -36,13 +36,19 @@ public final class MinimapConcentrationOverlay extends ChunkHighlighter {
         if (!ClientConfig.minimapOverlayEnabled()) {
             return false;
         }
-        return ClientConcentration.get().store().hasRegionData(
-                new RegionKey(dimension.location().toString(), regionX, regionZ));
+        return ClientConcentration.get().store().hasRegionData(new RegionKey(
+                ClientConcentration.get().dimensionIdOf(dimension), regionX, regionZ));
     }
 
     @Override
     public boolean chunkIsHighlit(ResourceKey<Level> dimension, int chunkX, int chunkZ) {
-        return observation(dimension, chunkX, chunkZ).isPresent();
+        if (!ClientConfig.minimapOverlayEnabled()) {
+            return false;
+        }
+        // Answers without building an observation; the minimap asks this and
+        // getColors for the same chunk on every frame.
+        return ClientConcentration.get().store()
+                .hasValue(ClientConcentration.get().key(dimension, chunkX, chunkZ));
     }
 
     @Override

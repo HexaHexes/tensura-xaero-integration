@@ -172,14 +172,36 @@ public final class ClientConfig {
     }
 
     /**
+     * The palette last resolved, and the inputs it was resolved from.
+     *
+     * <p>Published as one immutable value so a render thread can never observe a
+     * half-updated memo. The server palette is compared by identity: it is
+     * replaced wholesale when the server sends its own, never mutated.</p>
+     */
+    private record PaletteMemo(OverlayPalette server, OverlayPalette resolved) {
+    }
+
+    private static volatile PaletteMemo paletteMemo;
+
+    /**
      * The palette to paint with: the server's (datapack) palette, with any band
      * this client's config names overriding it.
      *
      * <p>An empty colour or an opacity of {@code -1} leaves that band as the
      * server sent it, which is why the shipped config overrides nothing.</p>
+     *
+     * <p>Memoised. Both map highlighters ask per chunk per frame, and resolving
+     * this means building a palette plus eight config lookups; doing that per
+     * chunk is a measurable cost for a value that changes when the config or the
+     * server's palette changes. Call {@link #invalidatePalette()} on reload.</p>
      */
     public static OverlayPalette palette(OverlayPalette serverPalette) {
-        return OverlayPalette.fromConfig(
+        OverlayPalette server = serverPalette == null ? OverlayPalette.defaults() : serverPalette;
+        PaletteMemo memo = paletteMemo;
+        if (memo != null && memo.server() == server) {
+            return memo.resolved();
+        }
+        OverlayPalette resolved = OverlayPalette.fromConfig(
                 index -> switch (index) {
                     case 0 -> SLIGHTLY_COLOR.get();
                     case 1 -> MODERATELY_COLOR.get();
@@ -192,6 +214,13 @@ public final class ClientConfig {
                     case 2 -> HIGHLY_OPACITY.get();
                     default -> EXCEPTIONALLY_OPACITY.get();
                 },
-                serverPalette == null ? OverlayPalette.defaults() : serverPalette);
+                server);
+        paletteMemo = new PaletteMemo(server, resolved);
+        return resolved;
+    }
+
+    /** Drops the memoised palette; the next paint resolves it from the config. */
+    public static void invalidatePalette() {
+        paletteMemo = null;
     }
 }

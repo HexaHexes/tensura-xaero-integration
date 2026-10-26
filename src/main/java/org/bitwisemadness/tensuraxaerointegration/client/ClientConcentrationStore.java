@@ -386,33 +386,31 @@ public final class ClientConcentrationStore {
      *         nothing expired
      */
     public Optional<Expiry> expire(long windowMillis) {
-        long now = now();
-        List<ChunkCacheKey> stale = new ArrayList<>();
-        ChunkCacheKey oldest = null;
-        long oldestAge = -1L;
-        for (ConcentrationCache.Snapshot snapshot : this.cache.snapshot()) {
-            ConcentrationEntry entry = snapshot.entry();
-            if (!entry.available() || entry.historical() || entry.fresh(now, windowMillis)) {
-                continue;
-            }
-            long age = now - entry.stampMillis();
-            stale.add(snapshot.key());
-            if (age > oldestAge) {
-                oldestAge = age;
-                oldest = snapshot.key();
-            }
-        }
-        if (stale.isEmpty()) {
+        List<ConcentrationCache.Expired> expired = this.cache.expire(now(), windowMillis);
+        if (expired.isEmpty()) {
             return Optional.empty();
         }
-        int demoted = 0;
-        for (ChunkCacheKey key : stale) {
-            if (this.cache.demote(key)) {
-                bumpRegion(key);
-                demoted++;
+        ChunkCacheKey oldest = null;
+        long oldestAge = -1L;
+        for (ConcentrationCache.Expired value : expired) {
+            bumpRegion(value.key());
+            if (value.ageMillis() > oldestAge) {
+                oldestAge = value.ageMillis();
+                oldest = value.key();
             }
         }
-        return demoted == 0 ? Optional.empty() : Optional.of(new Expiry(demoted, oldest, oldestAge));
+        return Optional.of(new Expiry(expired.size(), oldest, oldestAge));
+    }
+
+    /**
+     * Whether anything displayable is held for a chunk, current or remembered.
+     *
+     * <p>What a map's "is this chunk highlit" hook needs, and it allocates
+     * nothing - unlike {@link #observe}, which is called once per chunk per frame
+     * by both highlighters.</p>
+     */
+    public boolean hasValue(ChunkCacheKey key) {
+        return this.cache.hasAvailable(key);
     }
 
     /**

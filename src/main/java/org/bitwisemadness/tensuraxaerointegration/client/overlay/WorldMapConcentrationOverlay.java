@@ -61,7 +61,10 @@ public final class WorldMapConcentrationOverlay extends ChunkHighlighter {
 
     @Override
     public boolean chunkIsHighlit(ResourceKey<Level> dimension, int chunkX, int chunkZ) {
-        return enabled() && observation(dimension, chunkX, chunkZ).isPresent();
+        // Xaero asks this *and* getColors for every chunk it draws, so it answers
+        // without building an observation: no Optional, no record, no palette.
+        return enabled() && ClientConcentration.get().store()
+                .hasValue(ClientConcentration.get().key(dimension, chunkX, chunkZ));
     }
 
     @Override
@@ -112,7 +115,7 @@ public final class WorldMapConcentrationOverlay extends ChunkHighlighter {
         if (!ClientConfig.worldMapHoverEnabled()) {
             return null;
         }
-        return HoverText.describe(dimension.location().toString(), chunkX, chunkZ);
+        return HoverText.describe(ClientConcentration.get().dimensionIdOf(dimension), chunkX, chunkZ);
     }
 
     @Override
@@ -129,6 +132,6 @@ public final class WorldMapConcentrationOverlay extends ChunkHighlighter {
     }
 
     private static RegionKey regionKey(ResourceKey<Level> dimension, int regionX, int regionZ) {
-        return new RegionKey(dimension.location().toString(), regionX, regionZ);
+        return new RegionKey(ClientConcentration.get().dimensionIdOf(dimension), regionX, regionZ);
     }
 }

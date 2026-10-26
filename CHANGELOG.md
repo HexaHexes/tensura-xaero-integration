@@ -4,6 +4,42 @@ All notable changes to this project. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses
 semantic versioning with pre-release suffixes.
 
+## [0.1.0-alpha.12] — 2026-10-26
+
+No behaviour change: the per-frame paint path and the expiry sweep stop allocating
+and stop fighting over one lock.
+
+### Changed
+
+- **The palette is resolved once, not once per chunk.** Both highlighters asked
+  `ClientConfig.palette` for every visible chunk every frame, which built a palette,
+  four tier styles and performed eight config lookups each time. It is now memoised
+  until a config reload (`ClientConfig.invalidatePalette`) or a different server
+  palette arrives.
+- **Chunk keys are built without a dimension string per call.** `location().toString()`
+  allocated a String for every chunk drawn; the last dimension id is memoised in
+  `ClientConcentration.dimensionIdOf`, which the region keys use too.
+- **`chunkIsHighlit` no longer builds an observation.** Xaero asks it and
+  `getColors` for the same chunk, so half of those calls now cost one map lookup
+  and nothing else (`ClientConcentrationStore.hasValue`).
+- **Band lookup no longer copies the enum array.** `values()` allocates a fresh
+  array on every call; `ConcentrationClassification.byCode` reads a cached one.
+- **Reads no longer mutate the cache.** The store was access-ordered, so every
+  repaint rewrote eviction order under the lock the tick thread writes with. Recency
+  now follows writes: the chunk still being confirmed keeps its slot, and what is on
+  screen no longer decides what survives.
+- **Expiry sweeps only current values.** It used to copy the entire cache - up to
+  `maxEntriesPerWorld`, 20 000 by default and 250 000 possible - into a snapshot
+  every second, though only live values can expire and most of a long session's
+  cache is remembered history. It now visits a live-key set (normally a few hundred)
+  and allocates only for what actually expires.
+
+### Fixed
+
+- The cadence estimate and its last sample survived a server restart, so the first
+  sweep of a second world in the same process was timed against the previous
+  world's then widened the client's window for fifteen sweeps.
+
 ## [0.1.0-alpha.11] — 2026-10-26
 
 The request area is a circle instead of a square.
