@@ -136,15 +136,72 @@ class ClientConcentrationStoreTest {
     }
 
     @Test
-    void expiry_names_the_chunk_it_demoted() {
+    void expiry_names_the_chunk_it_demoted_and_the_real_gap() {
         ClientConcentrationStore store = newStore();
         store.offer(CHUNK, true, 600.0, SLIGHTLY);
         assertTrue(store.expire(1_000).isEmpty(), "nothing has expired yet");
 
         advance(5_000);
-        assertEquals(Optional.of(CHUNK), store.expire(1_000),
-                "the caller needs the chunk to report why it dimmed");
+        ClientConcentrationStore.Expiry expiry = store.expire(1_000).orElseThrow();
+        assertEquals(1, expiry.count(), "one value dimmed");
+        assertEquals(CHUNK, expiry.oldest(), "the caller needs the chunk to report why it dimmed");
+        // The gap is measured before the entry is demoted; a demoted entry keeps
+        // its value but no stamp, so reading it afterwards reports the epoch.
+        assertEquals(5_000, expiry.oldestAgeMillis(), "the reported gap is the real one, not the clock's value");
         assertTrue(store.expire(1_000).isEmpty(), "it is already last known");
+    }
+
+    @Test
+    void a_sweep_reports_how_many_values_went_at_once() {
+        ClientConcentrationStore store = newStore();
+        ChunkCacheKey second = new ChunkCacheKey("sp:world", "minecraft:overworld", 35, -3);
+        store.offer(CHUNK, true, 600.0, SLIGHTLY);
+        advance(2_000);
+        store.offer(second, true, 600.0, SLIGHTLY);
+        store.drainDirtyRegions();
+
+        advance(10_000);
+        ClientConcentrationStore.Expiry expiry = store.expire(1_000).orElseThrow();
+        assertEquals(2, expiry.count(), "a sweep that demotes a crowd is reported as such");
+        assertEquals(CHUNK, expiry.oldest(), "the value that had gone longest is the one named");
+        assertEquals(12_000, expiry.oldestAgeMillis());
+    }
+
+    @Test
+    void time_spent_paused_does_not_age_a_value() {
+        ClientConcentrationStore store = newStore();
+        store.offer(CHUNK, true, 600.0, SLIGHTLY);
+        long window = store.staleAfterMillis();
+
+        // A five-minute pause menu: the wall clock ran, the server did not.
+        advance(300_000);
+        store.addPausedMillis(300_000);
+        assertTrue(observe(store, CHUNK, window).orElseThrow().live(),
+                "a paused server cannot confirm anything, so nothing expired");
+        assertTrue(store.expire(window).isEmpty());
+        assertEquals(300_000, store.pausedMillis());
+
+        // Unpaused time still counts.
+        advance(ClientConcentrationStore.MIN_STALE_MILLIS + window);
+        assertFalse(observe(store, CHUNK, window).orElseThrow().live(),
+                "real silence after the pause is still honest staleness");
+        assertEquals(1, store.expire(window).orElseThrow().count());
+    }
+
+    @Test
+    void a_negative_pause_duration_is_ignored() {
+        ClientConcentrationStore store = newStore();
+        store.addPausedMillis(-5_000);
+        assertEquals(0, store.pausedMillis(), "a clock going backwards must not credit the future");
+    }
+
+    @Test
+    void clearing_server_info_forgets_paused_time() {
+        ClientConcentrationStore store = newStore();
+        store.addPausedMillis(4_000);
+        assertEquals(4_000, store.pausedMillis());
+        store.clearServerInfo();
+        assertEquals(0, store.pausedMillis(), "paused time belongs to the session that ended");
     }
 
     @Test

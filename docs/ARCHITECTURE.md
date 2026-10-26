@@ -147,7 +147,9 @@ The session owner. On every client tick it:
 1. detects a world or dimension change and starts a new session (clearing the
    store, releasing the old dimension's subscriptions);
 2. ticks the store, and every 20 ticks expires values past the freshness window
-   the server's cadence implies (twice its `refreshIntervalTicks`);
+   the server's cadence implies (three measured confirmations of its
+   `refreshIntervalTicks`), first moving any time spent paused out of the clock —
+   a paused integrated server confirms nothing, so that time cannot age a value;
 3. re-declares its mapped set every `subscribeIntervalTicks` (and every 200 ticks
    re-sends the whole set, which is idempotent and self-healing against a server
    radius cap smaller than the client's);
@@ -157,6 +159,15 @@ The mapped set is built from `WorldMapBridge.mappedChunks(...)` and
 `MinimapBridge.mappedChunks(...)` — the maps' own mapped state, intersected with
 the configured radius around the player. A chunk that is not mapped is never
 requested.
+
+Xaero answers that query from the layers and regions it **currently holds in
+memory**, so an eviction or a cave-layer change makes chunks that are still mapped
+on disk disappear from the set for a while. The session therefore remembers, for
+`MAPPED_MEMORY_TICKS` (60 s), every chunk the maps have reported and keeps
+subscribed to those that are still within the radius. A chunk only leaves the set
+when it leaves the radius or stays unreported for that long — otherwise the
+subscription set churned, demoted values, and re-subscribed them twenty ticks
+later, which is a visible dim and re-brighten on chunks that were never in doubt.
 
 ### `client/ClientConcentrationStore`
 Pure, Minecraft-free store (`ChunkCacheKey` → entry) with two display states.

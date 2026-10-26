@@ -4,6 +4,36 @@ All notable changes to this project. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses
 semantic versioning with pre-release suffixes.
 
+## [0.1.0-alpha.9] — 2026-10-26
+
+Values stop dimming while the game is paused, and the log now says which silence
+actually demoted them.
+
+### Fixed
+
+- **Every value dimmed after a pause, then came back.** The freshness window is
+  wall-clock time, but a singleplayer pause freezes the integrated server while the
+  client keeps ticking, so a pause menu left open long enough expired the whole map
+  and unpausing re-brightened it as heartbeats resumed. Time the server spent paused
+  is now removed from the clock, so a pause cannot age a value.
+- **Chunks the player was standing in stopped being confirmed.** The mapped set came
+  from Xaero's *currently loaded* layers and regions, so an eviction made chunks that
+  are still mapped disappear from the set: they were unsubscribed, demoted, and
+  re-subscribed a second later, which is the dim-and-restore cycle itself. A chunk
+  the maps have reported is now remembered for 60 s and stays subscribed while it is
+  in range, and a confirmation for a still-subscribed chunk is accepted even if the
+  map query momentarily says otherwise.
+- **The diagnostic line reported the epoch as the gap.** `no confirmation for
+  1793012145425 ms` was `now - 0`: the age was read after demotion replaced the
+  entry, and a demoted entry carries no stamp. The gap is measured before demoting.
+
+### Changed
+
+- The expiry line now reports how many values went at once and how much of the
+  session was paused, plus a second line for the first sweep that demotes eight or
+  more. One chunk going quiet is a missed beat; a sweep that demotes dozens is the
+  server having been unable to tick, and the log distinguishes them.
+
 ## [0.1.0-alpha.8] — 2026-10-26
 
 Values stopped flickering between current and last known on a busy server.

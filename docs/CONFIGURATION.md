@@ -80,6 +80,13 @@ in client ticks then expires before the next confirmation arrives. Three beats o
 slack is what absorbs the remaining stutters. The measured cadence is logged on join,
 next to the baseline.
 
+Paused time does not count. Opening the pause menu in singleplayer freezes the
+integrated server, which then confirms nothing at all, while the client keeps
+running; counting that time would expire every value in the world and dim the whole
+map for as long as the menu was open, then bring it back the moment play resumed.
+The log line that reports an expiry says how much of the session was paused, so a
+pause can be told from a server that genuinely went quiet.
+
 This is the line between "the server says this is what it is now" and "this is
 what it was when I was last there". It is a display rule, not a data rule: the
 number is never discarded by it, only relabelled.

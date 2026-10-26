@@ -72,7 +72,7 @@ public final class ClientConfig {
 
         builder.push("freshness");
         builder.comment("How long a value counts as current is NOT set here: it is derived from")
-                .comment("the server's own refresh interval (twice that interval), so the two")
+                .comment("the server's own refresh interval (three confirmations of it), so the two")
                 .comment("cannot disagree. A value past that window keeps its number, is drawn")
                 .comment("dimmer and is labelled last known. The server's interval is logged on")
                 .comment("join.");

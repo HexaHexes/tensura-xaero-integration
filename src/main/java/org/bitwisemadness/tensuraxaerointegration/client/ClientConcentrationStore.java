@@ -44,7 +44,11 @@ import org.bitwisemadness.tensuraxaerointegration.concentration.OverlayPalette;
  * datapack palette in {@link #setServerPalette}, the refresh cadence in
  * {@link #setServerRefreshInterval}).</p>
  *
- * <p>Time is the client tick counter, supplied by {@link #tick()}.</p>
+ * <p>Time is wall-clock milliseconds from an injectable clock, minus the time the
+ * integrated server spent paused ({@link #addPausedMillis}). A paused server
+ * confirms nothing, so paused time must not count towards staleness: otherwise
+ * every value in the world expires while the pause menu is open and comes back
+ * when it closes, which looks exactly like a value that was never in doubt.</p>
  */
 public final class ClientConcentrationStore {
 
@@ -111,6 +115,10 @@ public final class ClientConcentrationStore {
     private final Set<RegionKey> dirtyRegions = new LinkedHashSet<>();
 
     private final LongSupplier clock;
+
+    /** Wall-clock time this session during which the server could not confirm anything. */
+    private long pausedMillis;
+
     private int serverRefreshIntervalTicks = 200;
     private long serverRefreshMillis = DEFAULT_SERVER_REFRESH_MILLIS;
     private OverlayPalette serverPalette = OverlayPalette.defaults();
@@ -128,9 +136,35 @@ public final class ClientConcentrationStore {
         this.clock = clock;
     }
 
-    /** The wall clock this store measures freshness against. */
+    /**
+     * The clock this store measures freshness against: wall-clock milliseconds
+     * with paused time excluded.
+     *
+     * <p>Stamps are taken with the same offset, so excluding paused time never
+     * makes an age negative: during a pause the offset grows by exactly as much
+     * as the wall clock does, which freezes every age where it was.</p>
+     */
     public long now() {
-        return this.clock.getAsLong();
+        return this.clock.getAsLong() - this.pausedMillis;
+    }
+
+    /**
+     * Records wall-clock time in which the server was paused and could not
+     * confirm any chunk.
+     *
+     * <p>A singleplayer pause freezes the integrated server but not the client's
+     * tick loop, so the client would otherwise age every value during a pause and
+     * dim the whole map on unpause.</p>
+     */
+    public void addPausedMillis(long millis) {
+        if (millis > 0L) {
+            this.pausedMillis += millis;
+        }
+    }
+
+    /** How much wall-clock time this session has spent paused. */
+    public long pausedMillis() {
+        return this.pausedMillis;
     }
 
     /**
@@ -312,6 +346,32 @@ public final class ClientConcentrationStore {
     }
 
     /**
+     * What one expiry sweep demoted, so a caller can report why values dimmed.
+     *
+     * <p>The number matters as much as the oldest chunk: one value going quiet is
+     * a missed confirmation, a sweep that demotes dozens is the server having been
+     * unable to tick at all (a pause, a dimension change, a stall).</p>
+     *
+     * @param count           how many values became last known
+     * @param oldest          the chunk that had gone longest without a confirmation
+     * @param oldestAgeMillis that chunk's real gap, measured before it was demoted
+     */
+    public record Expiry(int count, ChunkCacheKey oldest, long oldestAgeMillis) {
+
+        public Expiry {
+            if (count <= 0) {
+                throw new IllegalArgumentException("an expiry sweep demoted at least one chunk");
+            }
+            if (oldest == null) {
+                throw new IllegalArgumentException("an expiry sweep has an oldest chunk");
+            }
+            if (oldestAgeMillis < 0L) {
+                throw new IllegalArgumentException("an age cannot be negative, was " + oldestAgeMillis);
+            }
+        }
+    }
+
+    /**
      * Demotes live values that have not been refreshed within
      * {@code windowMillis} and dirties their regions once.
      *
@@ -319,23 +379,40 @@ public final class ClientConcentrationStore {
      * repaint; the cache reports each entry only once, so a long-idle value does
      * not repaint its region every sweep.</p>
      *
-     * @return the first chunk demoted by this sweep, so a caller can report why;
-     *         empty when nothing expired
+     * <p>The gap is measured before demoting, because a demoted entry no longer
+     * carries a stamp - reading it afterwards reports the epoch as the age.</p>
+     *
+     * @return what this sweep demoted, so a caller can report why; empty when
+     *         nothing expired
      */
-    public Optional<ChunkCacheKey> expire(long windowMillis) {
-        Optional<ChunkCacheKey> first = Optional.empty();
+    public Optional<Expiry> expire(long windowMillis) {
+        long now = now();
+        List<ChunkCacheKey> stale = new ArrayList<>();
+        ChunkCacheKey oldest = null;
+        long oldestAge = -1L;
         for (ConcentrationCache.Snapshot snapshot : this.cache.snapshot()) {
             ConcentrationEntry entry = snapshot.entry();
-            if (entry.available() && !entry.historical() && !entry.fresh(now(), windowMillis)) {
-                if (this.cache.demote(snapshot.key())) {
-                    bumpRegion(snapshot.key());
-                    if (first.isEmpty()) {
-                        first = Optional.of(snapshot.key());
-                    }
-                }
+            if (!entry.available() || entry.historical() || entry.fresh(now, windowMillis)) {
+                continue;
+            }
+            long age = now - entry.stampMillis();
+            stale.add(snapshot.key());
+            if (age > oldestAge) {
+                oldestAge = age;
+                oldest = snapshot.key();
             }
         }
-        return first;
+        if (stale.isEmpty()) {
+            return Optional.empty();
+        }
+        int demoted = 0;
+        for (ChunkCacheKey key : stale) {
+            if (this.cache.demote(key)) {
+                bumpRegion(key);
+                demoted++;
+            }
+        }
+        return demoted == 0 ? Optional.empty() : Optional.of(new Expiry(demoted, oldest, oldestAge));
     }
 
     /**
@@ -394,6 +471,8 @@ public final class ClientConcentrationStore {
         this.serverRefreshIntervalTicks = 200;
         this.serverRefreshMillis = DEFAULT_SERVER_REFRESH_MILLIS;
         this.serverPalette = OverlayPalette.defaults();
+        // Paused time belongs to the session that is ending; stamps are cleared too.
+        this.pausedMillis = 0L;
     }
 
     public int size() {
