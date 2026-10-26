@@ -28,14 +28,14 @@ CI job starts from a clean checkout, so it cannot hit it.
 
 | Command | Result |
 | --- | --- |
-| `./gradlew test` | **129 tests, 0 failures, 0 errors** (10 classes) |
+| `./gradlew test` | **130 tests, 0 failures, 0 errors** (10 classes) |
 | `./gradlew build` | **BUILD SUCCESSFUL**, jar produced |
 | `./gradlew runGameTestServer` | **6 tests ran, all passed** — `All 6 required tests passed :)`, task reported `GameTest OK: all 6 tests passed` |
 
 These are the only runs backing the claims in this repository. Nothing
 client-rendering related was verified — see §6.
 
-## 3. JUnit suite (129 tests)
+## 3. JUnit suite (130 tests)
 
 All of these compile and run without Minecraft because the logic sits in
 Minecraft-free classes.

@@ -57,6 +57,11 @@ public final class ClientConcentration {
     private int lastResyncTick;
     private int lastSaveTick;
 
+    // One-shot diagnostics: "why did that value dim?" is otherwise guesswork.
+    private boolean expiryReported;
+    private boolean unavailableReported;
+    private boolean removalReported;
+
     /** Created on first use, so no config value is read during class initialisation. */
     private ClientConcentrationStore store;
     private final ConcentrationStorage storage = new ConcentrationStorage(FMLPaths.GAMEDIR.get());
@@ -119,7 +124,7 @@ public final class ClientConcentration {
             // The window follows the server's own confirmation cadence, so it can
             // never be shorter than the server's heartbeat or longer than the
             // server's promise to keep a chunk current.
-            store().expire(store().staleAfterMillis());
+            store().expire(store().staleAfterMillis()).ifPresent(this::reportExpiry);
         }
         if (this.ticks - this.lastSaveTick >= SAVE_INTERVAL_TICKS) {
             this.lastSaveTick = this.ticks;
@@ -165,6 +170,7 @@ public final class ClientConcentration {
             boolean mapped = isMapped(dimensionKey, chunkX, chunkZ);
             double value = values[i];
             if (Double.isNaN(value)) {
+                reportUnavailable(key);
                 store().markUnavailable(key, mapped);
             } else {
                 // The band is the server's decision; the client stores it as-is.
@@ -184,6 +190,9 @@ public final class ClientConcentration {
         this.dimensionId = "";
         this.lastSubscribeTick = 0;
         this.subscribeRefreshDue = true;
+        this.expiryReported = false;
+        this.unavailableReported = false;
+        this.removalReported = false;
         ClientPayloadHandler.resetBaselineLog();
     }
 
@@ -275,6 +284,9 @@ public final class ClientConcentration {
         this.lastResyncTick = 0;
         this.subscribeRefreshDue = true;
         this.ticks = 0;
+        this.expiryReported = false;
+        this.unavailableReported = false;
+        this.removalReported = false;
     }
 
     private void updateSubscriptions(Minecraft minecraft) {
@@ -326,9 +338,49 @@ public final class ClientConcentration {
                 // last-known rather than disappearing.
                 store().demote(key);
             }
+            reportRemoval(removed.size());
         }
         this.subscriptions.clear();
         this.subscriptions.addAll(wanted);
+    }
+
+    /**
+     * One-shot report of a value that expired: names the gap and the window, so a
+     * flicker can be attributed to the confirmation cadence rather than guessed at.
+     */
+    private void reportExpiry(ChunkCacheKey key) {
+        if (this.expiryReported) {
+            return;
+        }
+        this.expiryReported = true;
+        ClientConcentrationStore store = store();
+        long age = store.rawEntry(key).map(entry -> store.now() - entry.stampMillis()).orElse(-1L);
+        TensuraXaeroIntegration.LOGGER.info(
+                "Chunk {},{} went last known: no confirmation for {} ms (window {} ms; the server "
+                        + "confirms every {} ticks, measured at {} ms)",
+                key.chunkX(), key.chunkZ(), age, store.staleAfterMillis(),
+                store.serverRefreshIntervalTicks(), store.serverRefreshMillis());
+    }
+
+    /** One-shot report of a chunk the server could not answer for. */
+    private void reportUnavailable(ChunkCacheKey key) {
+        if (this.unavailableReported) {
+            return;
+        }
+        this.unavailableReported = true;
+        TensuraXaeroIntegration.LOGGER.info(
+                "Chunk {},{} was reported unreadable by the server; its value is now last known",
+                key.chunkX(), key.chunkZ());
+    }
+
+    /** One-shot report of chunks that left the request range and were demoted. */
+    private void reportRemoval(int count) {
+        if (this.removalReported) {
+            return;
+        }
+        this.removalReported = true;
+        TensuraXaeroIntegration.LOGGER.info(
+                "{} chunk(s) left the request range; their values are now last known", count);
     }
 
     private Set<Long> mappedChunksNearby(Minecraft minecraft) {

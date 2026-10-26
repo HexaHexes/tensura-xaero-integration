@@ -24,6 +24,12 @@ Values stopped flickering between current and last known on a busy server.
 - `ServerInfoPayload` carries the measured cadence in milliseconds alongside the tick
   count; protocol version is now 4.
 
+### Added
+
+- One-shot log lines that name why a value went last known, so the next flicker
+  report answers itself: a confirmation gap (`no confirmation for N ms`), a chunk
+  the server could not read, or a chunk that left the request range.
+
 ### Changed
 
 - `ConcentrationEntry` timestamps are wall-clock milliseconds, and the client store

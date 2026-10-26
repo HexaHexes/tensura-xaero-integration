@@ -20,7 +20,7 @@ third-party API — it records what those jars actually expose and what they do 
 
 **Test:** `./gradlew runGameTestServer` — `ConcentrationGameTests` (6 tests).
 `expectedTests = 6` in `build.gradle` must match the `@GameTest` count. JUnit:
-`./gradlew test` (129 tests, no Minecraft needed).
+`./gradlew test` (130 tests, no Minecraft needed).
 
 **Gotchas**
 - **Two mixins are load-bearing.** `mixin/worldmap/WorldMapHighlighterRegistryMixin`

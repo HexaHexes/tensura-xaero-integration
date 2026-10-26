@@ -136,6 +136,18 @@ class ClientConcentrationStoreTest {
     }
 
     @Test
+    void expiry_names_the_chunk_it_demoted() {
+        ClientConcentrationStore store = newStore();
+        store.offer(CHUNK, true, 600.0, SLIGHTLY);
+        assertTrue(store.expire(1_000).isEmpty(), "nothing has expired yet");
+
+        advance(5_000);
+        assertEquals(Optional.of(CHUNK), store.expire(1_000),
+                "the caller needs the chunk to report why it dimmed");
+        assertTrue(store.expire(1_000).isEmpty(), "it is already last known");
+    }
+
+    @Test
     void a_refresh_after_demotion_makes_the_value_live_again() {
         ClientConcentrationStore store = newStore();
         store.offer(CHUNK, true, 600.0, SLIGHTLY);

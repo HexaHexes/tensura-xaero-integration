@@ -318,16 +318,24 @@ public final class ClientConcentrationStore {
      * <p>Demotion is a visible change (bright to dim), so it has to trigger a
      * repaint; the cache reports each entry only once, so a long-idle value does
      * not repaint its region every sweep.</p>
+     *
+     * @return the first chunk demoted by this sweep, so a caller can report why;
+     *         empty when nothing expired
      */
-    public void expire(long windowMillis) {
+    public Optional<ChunkCacheKey> expire(long windowMillis) {
+        Optional<ChunkCacheKey> first = Optional.empty();
         for (ConcentrationCache.Snapshot snapshot : this.cache.snapshot()) {
             ConcentrationEntry entry = snapshot.entry();
             if (entry.available() && !entry.historical() && !entry.fresh(now(), windowMillis)) {
                 if (this.cache.demote(snapshot.key())) {
                     bumpRegion(snapshot.key());
+                    if (first.isEmpty()) {
+                        first = Optional.of(snapshot.key());
+                    }
                 }
             }
         }
+        return first;
     }
 
     /**
