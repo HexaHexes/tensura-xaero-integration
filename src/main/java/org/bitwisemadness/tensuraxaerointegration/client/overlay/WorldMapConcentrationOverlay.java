@@ -125,7 +125,7 @@ public final class WorldMapConcentrationOverlay extends ChunkHighlighter {
         ClientConcentrationStore store = ClientConcentration.get().store();
         return store.observe(
                 ClientConcentration.get().key(dimension, chunkX, chunkZ),
-                store.staleAfterTicks());
+                store.staleAfterMillis());
     }
 
     private static RegionKey regionKey(ResourceKey<Level> dimension, int regionX, int regionZ) {

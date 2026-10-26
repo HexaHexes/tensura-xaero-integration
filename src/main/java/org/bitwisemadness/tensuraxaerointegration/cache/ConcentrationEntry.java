@@ -20,13 +20,21 @@ package org.bitwisemadness.tensuraxaerointegration.cache;
  * could not classify it. It is stored, not recomputed: the tiers are the
  * server's, so a client-side second opinion is exactly what must not exist.</p>
  *
+ * <p>Timestamps are wall-clock milliseconds, not ticks. The server confirms a
+ * chunk on its own tick counter, and a server that cannot keep up stretches those
+ * ticks in real time; measuring the gap in client ticks compared two unsynchronised
+ * clocks and made values flicker between live and last known on exactly the
+ * servers where the feature matters.</p>
+ *
  * @param value      the observed concentration, or NaN when unavailable
  * @param band       the server's band code, or -1 when unclassified
- * @param tick       the tick the observation was taken at (ignored when historical)
+ * @param stampMillis when the observation was taken, in wall-clock ms (ignored when
+ *                   historical)
  * @param available  whether {@code value} is real
  * @param historical whether the value is a remembered observation, not a current one
  */
-public record ConcentrationEntry(double value, int band, long tick, boolean available, boolean historical) {
+public record ConcentrationEntry(double value, int band, long stampMillis, boolean available,
+        boolean historical) {
 
     /** No band: the value could not be classified, so nothing is painted for it. */
     public static final int UNCLASSIFIED = -1;
@@ -46,12 +54,12 @@ public record ConcentrationEntry(double value, int band, long tick, boolean avai
         }
     }
 
-    static ConcentrationEntry of(double value, int band, long tick) {
-        return new ConcentrationEntry(value, band, tick, true, false);
+    static ConcentrationEntry of(double value, int band, long stampMillis) {
+        return new ConcentrationEntry(value, band, stampMillis, true, false);
     }
 
-    static ConcentrationEntry unavailable(long tick) {
-        return new ConcentrationEntry(Double.NaN, UNCLASSIFIED, tick, false, false);
+    static ConcentrationEntry unavailable(long stampMillis) {
+        return new ConcentrationEntry(Double.NaN, UNCLASSIFIED, stampMillis, false, false);
     }
 
     /** A remembered observation: shown dimmer and labelled last-known. */
@@ -60,15 +68,15 @@ public record ConcentrationEntry(double value, int band, long tick, boolean avai
     }
 
     /** Whether the observation is current: available, not historical, within the window. */
-    public boolean fresh(long now, long staleAfterTicks) {
+    public boolean fresh(long nowMillis, long windowMillis) {
         if (!this.available || this.historical) {
             return false;
         }
-        if (now < this.tick) {
-            // Clock went backwards (world switch resets tick counters): treat as
-            // stale rather than trusting a timestamp from another session.
+        if (nowMillis < this.stampMillis) {
+            // Clock went backwards (system time change): treat as stale rather than
+            // trusting a timestamp from the future.
             return false;
         }
-        return now - this.tick <= staleAfterTicks;
+        return nowMillis - this.stampMillis <= windowMillis;
     }
 }

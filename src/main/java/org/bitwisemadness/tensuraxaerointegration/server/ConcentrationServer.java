@@ -27,10 +27,12 @@ import org.bitwisemadness.tensuraxaerointegration.net.PackedChunkPos;
 import org.bitwisemadness.tensuraxaerointegration.net.ServerInfoPayload;
 import org.bitwisemadness.tensuraxaerointegration.net.SubscriptionPayload;
 import org.bitwisemadness.tensuraxaerointegration.concentration.ConcentrationClassification;
+import org.bitwisemadness.tensuraxaerointegration.refresh.CadenceEstimate;
 import org.bitwisemadness.tensuraxaerointegration.refresh.ReconcileCursor;
 import org.bitwisemadness.tensuraxaerointegration.refresh.UpdateQueue;
 import org.bitwisemadness.tensuraxaerointegration.tensura.TensuraBridge;
 import org.bitwisemadness.tensuraxaerointegration.tiers.DimensionTier;
+import org.bitwisemadness.tensuraxaerointegration.util.ChunkRadius;
 import org.bitwisemadness.tensuraxaerointegration.tiers.MagiculeTiers;
 
 /**
@@ -60,8 +62,15 @@ public final class ConcentrationServer {
 
     private static final ConcentrationServer INSTANCE = new ConcentrationServer();
 
-    /** How often the baseline and refresh cadence are re-sent to every player. */
-    private static final int SERVER_INFO_REFRESH_INTERVAL_TICKS = 600;
+    /**
+     * How often the baseline and refresh cadence are re-sent to every player.
+     *
+     * <p>Short enough that a promise widened by a stall reaches the clients within
+     * one confirmation: a window derived from a promise the server has already
+     * outgrown is exactly the dishonesty this message exists to avoid. The payload
+     * is a few dozen bytes.</p>
+     */
+    private static final int SERVER_INFO_REFRESH_INTERVAL_TICKS = 200;
 
     /** Retry delay while Tensura's baseline cannot be read at all. */
     private static final int BASELINE_RETRY_TICKS = 100;
@@ -78,6 +87,16 @@ public final class ConcentrationServer {
     /** Tensura's baseline as last read, NaN when unreadable; a tier fallback. */
     private double baseline = Double.NaN;
 
+    // One-shot diagnostics for chunks the server could not answer for.
+    private boolean unloadedChunkReported;
+    private boolean unreadableLoadedReported;
+
+    /** When the last cadence sample was taken, in {@link System#nanoTime()}. */
+    private long lastCadenceSampleNanos;
+
+    /** The promise sent to clients; rebuilt when the configured interval changes. */
+    private CadenceEstimate cadence;
+
     private ConcentrationServer() {
     }
 
@@ -93,6 +112,8 @@ public final class ConcentrationServer {
         this.players.clear();
         this.lastBaselineTick = Integer.MIN_VALUE;
         this.baseline = Double.NaN;
+        this.unloadedChunkReported = false;
+        this.unreadableLoadedReported = false;
     }
 
     /** Called on server stop: drops every subscription and pending update. */
@@ -155,7 +176,7 @@ public final class ConcentrationServer {
             for (long packed : chunks) {
                 int chunkX = PackedChunkPos.unpackX(packed);
                 int chunkZ = PackedChunkPos.unpackZ(packed);
-                if (!withinRadius(chunkX, chunkZ, playerChunkX, playerChunkZ, radius)) {
+                if (!ChunkRadius.within(chunkX, chunkZ, playerChunkX, playerChunkZ, radius)) {
                     continue;
                 }
                 ChunkCacheKey key = key(level, chunkX, chunkZ);
@@ -228,6 +249,9 @@ public final class ConcentrationServer {
             return;
         }
         int now = server.getTickCount();
+        if (now % REFRESH_CHECK_INTERVAL_TICKS == 0) {
+            sampleCadence();
+        }
         boolean enabled = ServerConfig.syncEnabled();
         boolean sendServerInfo = now - this.lastBaselineTick >= SERVER_INFO_REFRESH_INTERVAL_TICKS;
         if (sendServerInfo) {
@@ -255,7 +279,8 @@ public final class ConcentrationServer {
                 // The heartbeat cadence travels with the baseline: the client derives
                 // its freshness window from it, so the two cannot drift apart.
                 PacketDistributor.sendToPlayer(player, new ServerInfoPayload(baseline,
-                        ServerConfig.refreshIntervalTicks(), MagiculeTiers.get().palette()));
+                        ServerConfig.refreshIntervalTicks(), refreshPromiseMillis(),
+                        MagiculeTiers.get().palette()));
                 state.baselinePending = false;
             }
             pruneIneligible(player, state);
@@ -292,6 +317,54 @@ public final class ConcentrationServer {
     }
 
     /**
+     * Measures how long the server really needs for one refresh interval.
+     *
+     * <p>The client's freshness window used to be a tick count, which assumed the
+     * server's ticks and the client's ticks advanced together. On a server that
+     * reports "Can't keep up" they do not: 200 server ticks can take far longer
+     * than 200 client ticks, so a value that was still being confirmed on
+     * schedule counted as stale in between. The promise is therefore measured, not
+     * assumed, and expressed in milliseconds.</p>
+     *
+     * <p>Stall samples are kept, not discarded: a stall is the case where the
+     * nominal figure is wrong, and dropping it let a server promise 10 s while
+     * needing 15. {@link CadenceEstimate} bounds the result on both sides and
+     * forgets a sample after a few sweeps, so a resumed pause cannot stretch the
+     * promise for longer than it lasted.</p>
+     */
+    private void sampleCadence() {
+        long nanos = System.nanoTime();
+        if (this.lastCadenceSampleNanos != 0L) {
+            cadence().record((nanos - this.lastCadenceSampleNanos) / 1_000_000L);
+        }
+        this.lastCadenceSampleNanos = nanos;
+    }
+
+    /**
+     * The estimate in force, rebuilt when a reload changes the configured interval
+     * (a promise expressed in an interval that no longer applies is worse than
+     * none) and lazily created so no config value is read during class init.
+     */
+    private CadenceEstimate cadence() {
+        int interval = ServerConfig.refreshIntervalTicks();
+        CadenceEstimate current = this.cadence;
+        if (current == null || current.intervalTicks() != interval) {
+            current = new CadenceEstimate(interval, REFRESH_CHECK_INTERVAL_TICKS);
+            this.cadence = current;
+        }
+        return current;
+    }
+
+    /**
+     * How long a client should trust a value before asking for another one: the
+     * measured cadence, never faster than the nominal 50 ms per tick and never
+     * wider than a bounded multiple of it.
+     */
+    private long refreshPromiseMillis() {
+        return cadence().promiseMillis();
+    }
+
+    /**
      * Confirms chunks whose value has not changed for a while.
      *
      * <p>Most chunks sit at their magicule ceiling and never change, so the
@@ -320,7 +393,7 @@ public final class ConcentrationServer {
             if (!state.subscriptions.contains(key)) {
                 continue;
             }
-            double concentration = readOrNaN(TensuraBridge.read(level, key.chunkX(), key.chunkZ()));
+            double concentration = readOrNaN(readFor(level, key));
             state.queue.offerRefresh(key, concentration, bandFor(key.dimension(), concentration));
             refreshed++;
         }
@@ -328,9 +401,44 @@ public final class ConcentrationServer {
 
     /** Reads a chunk's current value and queues it when it differs from what was sent. */
     private void offerCurrent(ServerLevel level, ChunkCacheKey key, int now, PlayerState state) {
-        OptionalDouble value = TensuraBridge.read(level, key.chunkX(), key.chunkZ());
-        double concentration = readOrNaN(value);
+        double concentration = readOrNaN(readFor(level, key));
         state.queue.offerIfChanged(key, concentration, bandFor(key.dimension(), concentration), now);
+    }
+
+    /**
+     * Reads a subscribed chunk, and says once per session why one could not be
+     * read.
+     *
+     * <p>The client only ever sees "no value", which is the same packet whether
+     * the chunk is outside the server's loaded area or the chunk is loaded and
+     * Tensura still answered nothing. Those are different problems - the first is
+     * expected as the loaded area moves, the second is an integration fault - and
+     * only the server can tell them apart, because it is the side that knows what
+     * it has loaded.</p>
+     */
+    private OptionalDouble readFor(ServerLevel level, ChunkCacheKey key) {
+        OptionalDouble value = TensuraBridge.read(level, key.chunkX(), key.chunkZ());
+        if (value.isEmpty()) {
+            reportUnreadable(level, key);
+        }
+        return value;
+    }
+
+    private void reportUnreadable(ServerLevel level, ChunkCacheKey key) {
+        boolean loaded = level.hasChunk(key.chunkX(), key.chunkZ());
+        if (loaded ? this.unreadableLoadedReported : this.unloadedChunkReported) {
+            return;
+        }
+        if (loaded) {
+            this.unreadableLoadedReported = true;
+        } else {
+            this.unloadedChunkReported = true;
+        }
+        TensuraXaeroIntegration.LOGGER.info(
+                "Chunk {},{} could not be read: {}; the client keeps its last known value",
+                key.chunkX(), key.chunkZ(), loaded
+                        ? "the chunk is loaded but Tensura returned no storage or no usable value"
+                        : "the server has no loaded chunk there");
     }
 
     /**
@@ -390,7 +498,7 @@ public final class ConcentrationServer {
         while (iterator.hasNext()) {
             ChunkCacheKey key = iterator.next();
             boolean otherDimension = !key.dimension().equals(state.dimension);
-            boolean tooFar = !withinRadius(key.chunkX(), key.chunkZ(), playerChunkX, playerChunkZ, radius);
+            boolean tooFar = !ChunkRadius.within(key.chunkX(), key.chunkZ(), playerChunkX, playerChunkZ, radius);
             if (otherDimension || tooFar) {
                 iterator.remove();
             }
@@ -402,10 +510,6 @@ public final class ConcentrationServer {
 
     private ChunkCacheKey key(ServerLevel level, int chunkX, int chunkZ) {
         return new ChunkCacheKey(this.worldToken, level.dimension().location().toString(), chunkX, chunkZ);
-    }
-
-    private static boolean withinRadius(int chunkX, int chunkZ, int centerX, int centerZ, int radius) {
-        return Math.abs(chunkX - centerX) <= radius && Math.abs(chunkZ - centerZ) <= radius;
     }
 
     private static double readOrNaN(OptionalDouble value) {

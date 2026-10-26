@@ -46,9 +46,9 @@ public final class ServerConfig {
                 .defineInRange("maxSubscribedChunksPerPlayer", 2048, 1, 65536);
         MAX_SUBSCRIBE_RADIUS_CHUNKS = builder
                 .comment("Largest distance, in chunks, between the player and a chunk the server")
-                .comment("will answer for. This is the hard limit that keeps a client from probing")
-                .comment("chunks it is not standing among; it must be at least the client's")
-                .comment("subscription radius or nothing is ever sent.")
+                .comment("will answer for, measured in a straight line. This is the hard limit that")
+                .comment("keeps a client from probing chunks it is not standing among; it must be at")
+                .comment("least the client's subscription radius or nothing is ever sent.")
                 .defineInRange("maxSubscribeRadiusChunks", 16, 1, 64);
         MIN_SUBSCRIBE_PACKET_INTERVAL_TICKS = builder
                 .comment("Minimum ticks between two subscription packets from one player.")
@@ -73,9 +73,9 @@ public final class ServerConfig {
                 .comment("How often a subscribed chunk that has not changed is confirmed again.")
                 .comment("Without this, a chunk sitting at its ceiling would be sent once and")
                 .comment("then look stale to the client, which dims it and labels it last known.")
-                .comment("The client derives its freshness window from this value (twice the")
-                .comment("interval), so raising it automatically makes values count as current")
-                .comment("for longer. 200 ticks is 10 seconds at 20 tps.")
+                .comment("The client derives its freshness window from this value (three measured")
+                .comment("confirmations of it), so raising it automatically makes values count as")
+                .comment("current for longer. 200 ticks is 10 seconds at 20 tps.")
                 .defineInRange("refreshIntervalTicks", 200, 20, 24000);
         MAX_UPDATES_PER_PACKET = builder
                 .comment("Chunk updates batched into one packet.")

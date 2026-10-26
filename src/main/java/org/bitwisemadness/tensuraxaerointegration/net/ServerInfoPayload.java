@@ -18,11 +18,13 @@ import org.bitwisemadness.tensuraxaerointegration.concentration.OverlayPalette;
  *       client's band thresholds track {@code area_magicule_config.baseMagicule}
  *       instead of a guess. {@link Double#NaN} means the server could not read
  *       one; the client then uses its configured fallback.</li>
- *   <li><b>refreshIntervalTicks</b> — how often the server re-confirms a
- *       subscribed chunk whose value has not changed. The client derives its
- *       freshness window from this instead of keeping a second, independent
- *       number that could disagree with the server and either dim values that
- *       are still being confirmed or trust ones that are not.</li>
+ *   <li><b>refreshIntervalTicks</b> and <b>refreshIntervalMillis</b> — how often
+ *       the server re-confirms a subscribed chunk whose value has not changed,
+ *       in its own ticks and in the real time those ticks actually take. The
+ *       second number is the one the client's freshness window is built from: a
+ *       server that cannot keep up stretches its ticks, and comparing a client
+ *       clock with a server tick counter made values flicker between live and
+ *       last known on exactly those servers.</li>
  *   <li><b>palette</b> — the datapack's default colours. A client config colour
  *       overrides the band it names; the rest fall back to these values.</li>
  * </ul>
@@ -30,8 +32,8 @@ import org.bitwisemadness.tensuraxaerointegration.concentration.OverlayPalette;
  * <p>Sent on join and refreshed periodically, so a server config change reaches
  * connected clients.</p>
  */
-public record ServerInfoPayload(double baseline, int refreshIntervalTicks, OverlayPalette palette)
-        implements CustomPacketPayload {
+public record ServerInfoPayload(double baseline, int refreshIntervalTicks, long refreshIntervalMillis,
+        OverlayPalette palette) implements CustomPacketPayload {
 
     public static final Type<ServerInfoPayload> TYPE = new Type<>(
             ResourceLocation.fromNamespaceAndPath(TensuraXaeroIntegration.MOD_ID, "server_info"));
@@ -41,6 +43,7 @@ public record ServerInfoPayload(double baseline, int refreshIntervalTicks, Overl
                     (buffer, payload) -> {
                         buffer.writeDouble(payload.baseline);
                         buffer.writeVarInt(payload.refreshIntervalTicks);
+                        buffer.writeVarLong(payload.refreshIntervalMillis);
                         for (OverlayPalette.TierStyle style : styles(payload.palette)) {
                             buffer.writeVarInt(style.rgb());
                             buffer.writeDouble(style.opacity());
@@ -49,17 +52,21 @@ public record ServerInfoPayload(double baseline, int refreshIntervalTicks, Overl
                     buffer -> {
                         double baseline = buffer.readDouble();
                         int interval = buffer.readVarInt();
+                        long intervalMillis = buffer.readVarLong();
                         OverlayPalette.TierStyle[] styles = new OverlayPalette.TierStyle[4];
                         for (int i = 0; i < styles.length; i++) {
                             styles[i] = new OverlayPalette.TierStyle(buffer.readVarInt(), buffer.readDouble());
                         }
-                        return new ServerInfoPayload(baseline, interval,
+                        return new ServerInfoPayload(baseline, interval, intervalMillis,
                                 new OverlayPalette(styles[0], styles[1], styles[2], styles[3]));
                     });
 
     public ServerInfoPayload {
         if (palette == null) {
             throw new IllegalArgumentException("the palette is required, if only to say 'use the defaults'");
+        }
+        if (refreshIntervalMillis <= 0) {
+            throw new IllegalArgumentException("the refresh promise must be positive, was " + refreshIntervalMillis);
         }
     }
 
@@ -77,6 +84,7 @@ public record ServerInfoPayload(double baseline, int refreshIntervalTicks, Overl
     /** Stores the server's parameters on the client thread. */
     public static void handle(ServerInfoPayload payload, IPayloadContext context) {
         context.enqueueWork(() -> org.bitwisemadness.tensuraxaerointegration.client.ClientPayloadHandler
-                .onServerInfo(payload.baseline(), payload.refreshIntervalTicks(), payload.palette()));
+                .onServerInfo(payload.baseline(), payload.refreshIntervalTicks(),
+                        payload.refreshIntervalMillis(), payload.palette()));
     }
 }

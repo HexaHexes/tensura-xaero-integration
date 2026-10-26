@@ -66,12 +66,35 @@ is meant to tint terrain, not hide it.
 | `historicalOpacityScale` | `0.45` | How bright a last-known value is drawn, as a fraction of its band's opacity. `0.0` keeps remembered values off the map entirely (they still answer the hover line); `1.0` draws them exactly as bright as a current value. |
 
 How long a value counts as **current** is not a client setting. It is derived from
-the server's `refresh.refreshIntervalTicks` — twice that interval, floored at 100
-ticks — because the server is the only side that knows how often it will confirm a
-chunk again. Keeping a second number here would let the two disagree: too short and
-values the server is still confirming would dim, too long and values it stopped
-confirming would claim to be current. The interval in force is logged on join, next
-to the baseline.
+the server's own confirmation cadence — three confirmations, floored at 3 seconds —
+because the server is the only side that knows how often it will confirm a chunk
+again. Keeping a second number here would let the two disagree: too short and values
+the server is still confirming would dim, too long and values it stopped confirming
+would claim to be current.
+
+The window is measured in **milliseconds of real time**, and the server reports how
+long one of its confirmations actually takes, not just how many ticks it waits. That
+distinction matters on a heavy pack: a server that prints `Can't keep up! ... 120
+ticks behind` stretches its 200-tick interval to many seconds, and a window counted
+in client ticks then expires before the next confirmation arrives. Three beats of
+slack is what absorbs the remaining stutters. The measured cadence is logged on join,
+next to the baseline.
+
+The measured cadence is the **worst** of the server's recent sweep timings, not the
+average and not a stall-free ideal: a fetch that took 1.5 s for 20 ticks really does
+mean 15 s for 200, and a promise that ignored it would be a lie the client acts on.
+It is floored at the configured interval (a fast server still confirms on schedule)
+and capped at four intervals, so a resumed pause cannot talk the client into
+trusting a value for minutes, and a stall stops counting after fifteen sweeps. The
+promise is re-sent every 200 ticks, so a server that starts stalling widens the
+client's window within one confirmation rather than thirty seconds later.
+
+Paused time does not count. Opening the pause menu in singleplayer freezes the
+integrated server, which then confirms nothing at all, while the client keeps
+running; counting that time would expire every value in the world and dim the whole
+map for as long as the menu was open, then bring it back the moment play resumed.
+The log line that reports an expiry says how much of the session was paused, so a
+pause can be told from a server that genuinely went quiet.
 
 This is the line between "the server says this is what it is now" and "this is
 what it was when I was last there". It is a display rule, not a data rule: the
@@ -93,7 +116,7 @@ already know. Deleting a file is safe: it is treated as "no history".
 
 | Key | Default | Effect |
 | --- | --- | --- |
-| `radiusChunks` | `10` | Radius around the player for which **mapped** chunks are requested. |
+| `radiusChunks` | `10` | Radius around the player for which **mapped** chunks are requested, in a straight line. |
 | `intervalTicks` | `20` | How often the mapped set is recomputed and sent. |
 | `batchSize` | `256` | Chunk entries per subscription packet. |
 
@@ -101,6 +124,13 @@ Only chunks the map says are mapped inside this radius are requested, so the
 mapped-chunk rule is enforced before a byte leaves the client. The server applies
 its own, independent radius cap — if the server's cap is smaller than this value,
 the missing chunks simply never arrive.
+
+The radius is a **circle, not a square**. This matters more than it sounds: the
+corners of a square of radius 10 are 14.1 chunks from the player, and a server
+only holds chunks loaded out to roughly its view distance, so those corners are
+chunks it has no data for at all. Every one of them could only ever be answered
+with "no value", which arrives as a chunk going last known for no reason the
+player can see. A circular radius asks only for what is plausibly loaded.
 
 ---
 
@@ -209,7 +239,7 @@ which is exactly the knob this datapack provides.
 | Key | Default | Effect |
 | --- | --- | --- |
 | `maxSubscribedChunksPerPlayer` | `2048` | Cap on one player's subscription set; bounds both bookkeeping and what a client can hold. |
-| `maxSubscribeRadiusChunks` | `16` | Largest distance in chunks between player and an answerable chunk. The hard limit that keeps a modified client from probing chunks it is not standing among. Must be at least the client's `radiusChunks` or nothing is sent. |
+| `maxSubscribeRadiusChunks` | `16` | Largest distance in chunks, measured in a straight line, between player and an answerable chunk. The hard limit that keeps a modified client from probing chunks it is not standing among. Must be at least the client's `radiusChunks` or nothing is sent. |
 | `minSubscribePacketIntervalTicks` | `5` | Minimum ticks between two subscription packets from one player. |
 
 ### `[refresh]`
@@ -219,7 +249,7 @@ which is exactly the knob this datapack provides.
 | `reconcileIntervalTicks` | `100` | How often the periodic sweep runs. |
 | `reconcileBudgetChunksPerPlayer` | `256` | Most subscribed chunks re-read per player per sweep. The cursor rotates, so every subscription is visited over successive sweeps. |
 | `minUpdateIntervalTicks` | `20` | Minimum ticks between two sends for the same chunk. A change inside the window stays pending — it is delayed, never dropped. |
-| `refreshIntervalTicks` | `200` | How often a subscribed chunk whose value has **not** changed is confirmed again. A chunk parked at its magicule ceiling never changes, so without this heartbeat it would be sent once and then count as last known on the client. Clients derive their freshness window from this value (twice the interval), so raising it also makes values stay current for longer. |
+| `refreshIntervalTicks` | `200` | How often a subscribed chunk whose value has **not** changed is confirmed again. A chunk parked at its magicule ceiling never changes, so without this heartbeat it would be sent once and then count as last known on the client. Clients derive their freshness window from this cadence (three times the interval, measured in real time), so raising it also makes values stay current for longer. |
 | `maxUpdatesPerPacket` | `256` | Chunk updates batched into one packet. |
 
 ---

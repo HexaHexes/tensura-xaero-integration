@@ -1,9 +1,12 @@
 package org.bitwisemadness.tensuraxaerointegration.client;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ServerData;
@@ -22,6 +25,7 @@ import org.bitwisemadness.tensuraxaerointegration.config.ClientConfig;
 import org.bitwisemadness.tensuraxaerointegration.net.ConcentrationPayload;
 import org.bitwisemadness.tensuraxaerointegration.net.PackedChunkPos;
 import org.bitwisemadness.tensuraxaerointegration.net.SubscriptionPayload;
+import org.bitwisemadness.tensuraxaerointegration.util.ChunkRadius;
 
 /**
  * Client-side session: owns the display store, decides which chunks to ask for,
@@ -54,13 +58,43 @@ public final class ClientConcentration {
     /** How often the remembered values are written to disk. */
     private static final int SAVE_INTERVAL_TICKS = 600;
 
+    /**
+     * How long a chunk stays subscribed after the maps stop reporting it as mapped.
+     *
+     * <p>Xaero's mapped query walks the map's <em>currently loaded</em> layers and
+     * regions, so a region eviction or a cave-layer change makes chunks that are
+     * still mapped on disk vanish from the set for a while. Treating that as "no
+     * longer mapped" unsubscribed them, demoted their values, and re-subscribed
+     * them twenty ticks later - a visible dim and re-brighten on chunks that were
+     * never in question. Xaero does not un-map a chunk, so the set remembers what
+     * it saw for a minute before believing the disappearance.</p>
+     */
+    private static final int MAPPED_MEMORY_TICKS = 1200;
+
+    /** A sweep that demotes this many at once is an event, not a missed beat. */
+    private static final int MASS_EXPIRY_CHUNKS = 8;
+
     private int lastResyncTick;
     private int lastSaveTick;
+
+    // One-shot diagnostics: "why did that value dim?" is otherwise guesswork.
+    private boolean expiryReported;
+    private boolean massExpiryReported;
+    private boolean unavailableReported;
+    private boolean removalReported;
+
+    // Pause accounting: the wall clock runs while the pause menu is open, but the
+    // integrated server does not, so that time must not age a value.
+    private long lastTickMillis;
+    private boolean pausedAtLastTick;
 
     /** Created on first use, so no config value is read during class initialisation. */
     private ClientConcentrationStore store;
     private final ConcentrationStorage storage = new ConcentrationStorage(FMLPaths.GAMEDIR.get());
     private final Set<ChunkCacheKey> subscriptions = new LinkedHashSet<>();
+
+    /** Chunks the maps reported as mapped, and the tick they last did. */
+    private final Map<ChunkCacheKey, Integer> mappedTicks = new HashMap<>();
 
     private String worldToken = "";
     private String dimensionId = "";
@@ -113,14 +147,14 @@ public final class ClientConcentration {
         if (!token.equals(this.worldToken) || !dimension.equals(this.dimensionId)) {
             beginSession(token, dimension);
         }
-        store().tick();
         this.ticks++;
+        accountForPause(minecraft);
 
         if (this.ticks % MAINTENANCE_INTERVAL_TICKS == 0) {
             // The window follows the server's own confirmation cadence, so it can
             // never be shorter than the server's heartbeat or longer than the
             // server's promise to keep a chunk current.
-            store().expire(store().staleAfterTicks());
+            store().expire(store().staleAfterMillis()).ifPresent(this::reportExpiry);
         }
         if (this.ticks - this.lastSaveTick >= SAVE_INTERVAL_TICKS) {
             this.lastSaveTick = this.ticks;
@@ -162,10 +196,14 @@ public final class ClientConcentration {
             ChunkCacheKey key = new ChunkCacheKey(token, dimension, chunkX, chunkZ);
             // Defence in depth: the store refuses unmapped chunks anyway, but the
             // mapped test is repeated here so a value can never be remembered for
-            // a chunk that stopped being mapped between request and reply.
-            boolean mapped = isMapped(dimensionKey, chunkX, chunkZ);
+            // a chunk that stopped being mapped between request and reply. A chunk
+            // this client still subscribes is accepted regardless: the map's
+            // region cache evicting a chunk does not un-map it, and dropping the
+            // confirmation would age a value that is being refreshed on schedule.
+            boolean mapped = this.subscriptions.contains(key) || isMapped(dimensionKey, chunkX, chunkZ);
             double value = values[i];
             if (Double.isNaN(value)) {
+                reportUnavailable(key);
                 store().markUnavailable(key, mapped);
             } else {
                 // The band is the server's decision; the client stores it as-is.
@@ -183,8 +221,15 @@ public final class ClientConcentration {
         store().clearServerInfo();
         this.worldToken = "";
         this.dimensionId = "";
+        this.mappedTicks.clear();
         this.lastSubscribeTick = 0;
         this.subscribeRefreshDue = true;
+        this.lastTickMillis = 0L;
+        this.pausedAtLastTick = false;
+        this.expiryReported = false;
+        this.massExpiryReported = false;
+        this.unavailableReported = false;
+        this.removalReported = false;
         ClientPayloadHandler.resetBaselineLog();
     }
 
@@ -272,10 +317,15 @@ public final class ClientConcentration {
         loadFromDisk(token);
         this.worldToken = token;
         this.dimensionId = dimension;
+        this.mappedTicks.clear();
         this.lastSubscribeTick = 0;
         this.lastResyncTick = 0;
         this.subscribeRefreshDue = true;
         this.ticks = 0;
+        this.expiryReported = false;
+        this.massExpiryReported = false;
+        this.unavailableReported = false;
+        this.removalReported = false;
     }
 
     private void updateSubscriptions(Minecraft minecraft) {
@@ -290,12 +340,39 @@ public final class ClientConcentration {
         if (minecraft.getConnection() == null) {
             return;
         }
+        int radius = ClientConfig.subscribeRadiusChunks();
+        int centerX = minecraft.player.chunkPosition().x;
+        int centerZ = minecraft.player.chunkPosition().z;
         Set<Long> mapped = mappedChunksNearby(minecraft);
         String token = this.worldToken.isBlank() ? "unknown" : this.worldToken;
         Set<ChunkCacheKey> wanted = new LinkedHashSet<>();
         for (long packed : mapped) {
-            wanted.add(new ChunkCacheKey(token, this.dimensionId,
-                    PackedChunkPos.unpackX(packed), PackedChunkPos.unpackZ(packed)));
+            int chunkX = PackedChunkPos.unpackX(packed);
+            int chunkZ = PackedChunkPos.unpackZ(packed);
+            // A straight-line radius, not the square the maps enumerate: a corner
+            // of a square of radius 10 is 14.1 chunks away, past anything the
+            // server has loaded, so asking for it only earns a "no value".
+            if (!ChunkRadius.within(chunkX, chunkZ, centerX, centerZ, radius)) {
+                continue;
+            }
+            ChunkCacheKey key = new ChunkCacheKey(token, this.dimensionId, chunkX, chunkZ);
+            wanted.add(key);
+            this.mappedTicks.put(key, this.ticks);
+        }
+        // Keep what the maps reported a moment ago: Xaero's mapped query reads the
+        // regions it currently holds, and an eviction there is not an un-mapping.
+        Iterator<Map.Entry<ChunkCacheKey, Integer>> remembered = this.mappedTicks.entrySet().iterator();
+        while (remembered.hasNext()) {
+            Map.Entry<ChunkCacheKey, Integer> entry = remembered.next();
+            ChunkCacheKey key = entry.getKey();
+            boolean expired = this.ticks - entry.getValue() > MAPPED_MEMORY_TICKS;
+            boolean elsewhere = !key.dimension().equals(this.dimensionId) || !key.world().equals(token);
+            boolean tooFar = !ChunkRadius.within(key.chunkX(), key.chunkZ(), centerX, centerZ, radius);
+            if (expired || elsewhere || tooFar) {
+                remembered.remove();
+            } else {
+                wanted.add(key);
+            }
         }
 
         List<ChunkCacheKey> added = new ArrayList<>();
@@ -325,11 +402,80 @@ public final class ClientConcentration {
             for (ChunkCacheKey key : removed) {
                 // Out of request range is not out of memory: the value becomes
                 // last-known rather than disappearing.
+                this.mappedTicks.remove(key);
                 store().demote(key);
             }
+            reportRemoval(removed.size());
         }
         this.subscriptions.clear();
         this.subscriptions.addAll(wanted);
+    }
+
+    /**
+     * Reports what expired: the gap, the window and how many values went at once,
+     * so a flicker can be attributed rather than guessed at.
+     *
+     * <p>One line for the first sweep of the session, plus one for the first sweep
+     * that demotes a crowd - a server that stopped ticking looks nothing like a
+     * single missed beat, and that difference is the whole diagnosis.</p>
+     */
+    private void reportExpiry(ClientConcentrationStore.Expiry expiry) {
+        boolean mass = expiry.count() >= MASS_EXPIRY_CHUNKS;
+        if (this.expiryReported && (!mass || this.massExpiryReported)) {
+            return;
+        }
+        this.expiryReported = true;
+        if (mass) {
+            this.massExpiryReported = true;
+        }
+        ClientConcentrationStore store = store();
+        ChunkCacheKey oldest = expiry.oldest();
+        TensuraXaeroIntegration.LOGGER.info(
+                "{} chunk(s) went last known this sweep; the oldest, chunk {},{}: no confirmation "
+                        + "for {} ms (window {} ms; the server confirms every {} ticks, measured at "
+                        + "{} ms; {} ms of this session was paused)",
+                expiry.count(), oldest.chunkX(), oldest.chunkZ(), expiry.oldestAgeMillis(),
+                store.staleAfterMillis(), store.serverRefreshIntervalTicks(),
+                store.serverRefreshMillis(), store.pausedMillis());
+    }
+
+    /**
+     * Moves time spent with the integrated server paused out of the freshness
+     * clock: a paused server confirms nothing, so that time cannot age a value.
+     *
+     * <p>The interval is credited on the first paused tick and again on the tick
+     * that resumes, so it is counted whether or not client ticks keep firing while
+     * the pause menu is open. Over-crediting is bounded by one tick per pause.</p>
+     */
+    private void accountForPause(Minecraft minecraft) {
+        long nowMillis = System.currentTimeMillis();
+        boolean paused = minecraft.isPaused();
+        if (this.lastTickMillis > 0L && (paused || this.pausedAtLastTick)) {
+            store().addPausedMillis(nowMillis - this.lastTickMillis);
+        }
+        this.lastTickMillis = nowMillis;
+        this.pausedAtLastTick = paused;
+    }
+
+    /** One-shot report of a chunk the server could not answer for. */
+    private void reportUnavailable(ChunkCacheKey key) {
+        if (this.unavailableReported) {
+            return;
+        }
+        this.unavailableReported = true;
+        TensuraXaeroIntegration.LOGGER.info(
+                "Chunk {},{} was reported unreadable by the server; its value is now last known",
+                key.chunkX(), key.chunkZ());
+    }
+
+    /** One-shot report of chunks that left the request range and were demoted. */
+    private void reportRemoval(int count) {
+        if (this.removalReported) {
+            return;
+        }
+        this.removalReported = true;
+        TensuraXaeroIntegration.LOGGER.info(
+                "{} chunk(s) left the request range; their values are now last known", count);
     }
 
     private Set<Long> mappedChunksNearby(Minecraft minecraft) {

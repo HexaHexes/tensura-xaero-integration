@@ -72,7 +72,7 @@ public final class ClientConfig {
 
         builder.push("freshness");
         builder.comment("How long a value counts as current is NOT set here: it is derived from")
-                .comment("the server's own refresh interval (twice that interval), so the two")
+                .comment("the server's own refresh interval (three confirmations of it), so the two")
                 .comment("cannot disagree. A value past that window keeps its number, is drawn")
                 .comment("dimmer and is labelled last known. The server's interval is logged on")
                 .comment("join.");
@@ -98,8 +98,10 @@ public final class ClientConfig {
         builder.push("subscription");
         SUBSCRIBE_RADIUS_CHUNKS = builder
                 .comment("Radius in chunks around the player for which mapped chunks are")
-                .comment("requested. The server caps this independently and only answers for")
-                .comment("chunks it currently has loaded.")
+                .comment("requested. Measured in a straight line, not as a square: a square's")
+                .comment("corners reach 1.4 times the radius, further than the server has")
+                .comment("chunks loaded. The server caps this independently and only answers")
+                .comment("for chunks it currently has loaded.")
                 .defineInRange("radiusChunks", 10, 1, 32);
         SUBSCRIBE_INTERVAL_TICKS = builder
                 .comment("How often the mapped-chunk set is recomputed and sent.")

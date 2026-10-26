@@ -77,6 +77,6 @@ public final class MinimapConcentrationOverlay extends ChunkHighlighter {
         ClientConcentrationStore store = ClientConcentration.get().store();
         return store.observe(
                 ClientConcentration.get().key(dimension, chunkX, chunkZ),
-                store.staleAfterTicks());
+                store.staleAfterMillis());
     }
 }

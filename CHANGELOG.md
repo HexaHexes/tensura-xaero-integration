@@ -4,7 +4,116 @@ All notable changes to this project. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses
 semantic versioning with pre-release suffixes.
 
-## [0.1.0-alpha.7] — 2026-10-26
+## [0.1.0-alpha.11] — 2026-10-26
+
+The request area is a circle instead of a square.
+
+### Fixed
+
+- **The client asked about chunks the server could never answer for.** The request
+  radius was a square: its corners sit 14.1 chunks from the player at
+  `radiusChunks = 10`, further than a server holds chunks loaded. Every corner chunk
+  therefore came back as "no value" and showed as last known, which is one of the
+  ways a normal, loaded area looked broken. `util/ChunkRadius` now measures in a
+  straight line, and the server's `maxSubscribeRadiusChunks` cap and its pruning use
+  the same predicate, so the two sides mean the same thing by "in range".
+- Which also removes most of the traffic that produced the unreadable-chunk line:
+  at radius 10 the request set drops from 441 chunks to 317.
+
+### Changed
+
+- The server's unreadable-chunk notice no longer blames a square radius that no
+  longer exists: a chunk it cannot read is either outside its loaded area or a
+  loaded chunk Tensura answered nothing for.
+
+## [0.1.0-alpha.10] — 2026-10-26
+
+The window follows the server through its own stalls, and an unreadable chunk now
+says which kind of unreadable it was.
+
+### Fixed
+
+- **A stalling server still promised a healthy cadence.** The measured promise threw
+  away every sample of 5 s or more, so a session logging `Can't keep up! ... 6330 ms
+  or 126 ticks behind` kept promising 10 s per confirmation while a confirmation took
+  far longer, and the client dimmed values the server was still sending. Stall
+  samples are now what the promise is built from: the worst of the last 15 timed
+  sweeps, extrapolated to one interval, floored at the nominal figure and capped at
+  four intervals so a resumed pause cannot claim minutes. A recovering server
+  narrows its promise again instead of carrying one stall for the session.
+- The promise (and the baseline) is re-sent every 200 ticks instead of 600, so a
+  server that starts stalling widens the client's window within one confirmation.
+
+### Added
+
+- `refresh/CadenceEstimate`, with its own unit tests, so the promise's bounds and
+  its decay are testable without a game.
+- The server now logs once per session why a subscribed chunk could not be read:
+  no loaded chunk there (expected at the corners of a square request radius that
+  reaches past the view distance) or a loaded chunk Tensura returned no storage or
+  no usable value for. The client receives the same `NaN` either way, so this is
+  the only place the two can be told apart.
+
+## [0.1.0-alpha.9] — 2026-10-26
+
+Values stop dimming while the game is paused, and the log now says which silence
+actually demoted them.
+
+### Fixed
+
+- **Every value dimmed after a pause, then came back.** The freshness window is
+  wall-clock time, but a singleplayer pause freezes the integrated server while the
+  client keeps ticking, so a pause menu left open long enough expired the whole map
+  and unpausing re-brightened it as heartbeats resumed. Time the server spent paused
+  is now removed from the clock, so a pause cannot age a value.
+- **Chunks the player was standing in stopped being confirmed.** The mapped set came
+  from Xaero's *currently loaded* layers and regions, so an eviction made chunks that
+  are still mapped disappear from the set: they were unsubscribed, demoted, and
+  re-subscribed a second later, which is the dim-and-restore cycle itself. A chunk
+  the maps have reported is now remembered for 60 s and stays subscribed while it is
+  in range, and a confirmation for a still-subscribed chunk is accepted even if the
+  map query momentarily says otherwise.
+- **The diagnostic line reported the epoch as the gap.** `no confirmation for
+  1793012145425 ms` was `now - 0`: the age was read after demotion replaced the
+  entry, and a demoted entry carries no stamp. The gap is measured before demoting.
+
+### Changed
+
+- The expiry line now reports how many values went at once and how much of the
+  session was paused, plus a second line for the first sweep that demotes eight or
+  more. One chunk going quiet is a missed beat; a sweep that demotes dozens is the
+  server having been unable to tick, and the log distinguishes them.
+
+## [0.1.0-alpha.8] — 2026-10-26
+
+Values stopped flickering between current and last known on a busy server.
+
+### Fixed
+
+- **Live values dimmed and came back on servers that could not keep up.** The
+  freshness window was counted in client ticks while the heartbeat was counted in
+  server ticks, so the two clocks were compared as if they were the same. On a pack
+  heavy enough to log `Can't keep up! ... 120 ticks behind`, 200 server ticks take
+  far longer than 200 client ticks, the window expired between two confirmations,
+  and the value flipped to last known until the next one arrived - including for the
+  chunk you were standing on. Freshness is now measured in **milliseconds of real
+  time** on the client, and the server reports how long one of its confirmations
+  actually takes (measured, not assumed), so a slow server widens its own window.
+- The window is now three confirmations rather than two. One beat of slack is not a
+  margin: a single multi-second stall consumed it.
+- `ServerInfoPayload` carries the measured cadence in milliseconds alongside the tick
+  count; protocol version is now 4.
+
+### Added
+
+- One-shot log lines that name why a value went last known, so the next flicker
+  report answers itself: a confirmation gap (`no confirmation for N ms`), a chunk
+  the server could not read, or a chunk that left the request range.
+
+### Changed
+
+- `ConcentrationEntry` timestamps are wall-clock milliseconds, and the client store
+  takes an injectable clock, so the tests describe a stalled server without sleeping.
 
 Tier entries for the dimensions the Tensura RPG pack actually has.
 

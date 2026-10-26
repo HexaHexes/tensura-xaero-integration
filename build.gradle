@@ -189,11 +189,45 @@ test {
 
 // --- GameTest harness -------------------------------------------------------
 
+// How long the headless GameTest server may run before it is killed. A healthy
+// run takes about 30 s including mod loading. The harness has no overall timeout
+// of its own: a run that registers its tests and then stops advancing prints
+// progress lines forever, which happened once (six tests registered, zero
+// progress, no error at all, eleven minutes and 380 000 log lines). Fail the
+// build instead of waiting for a human to notice. Override on a slow machine
+// with -PgametestTimeoutSeconds=...
+def gametestTimeoutSeconds = (project.findProperty('gametestTimeoutSeconds') ?: '240') as int
+
+// Runs even when the run task was killed by its timeout, which is exactly the case
+// where the grader above never gets a chance to explain itself.
+def reportGametestStall = tasks.register('reportGametestStall') {
+    doLast {
+        def log = file('run/logs/latest.log')
+        if (!log.exists()) {
+            return
+        }
+        def text = log.text
+        if (text.contains('tests are now running') && !(text =~ /GAME TESTS COMPLETE/).find()) {
+            logger.error("GameTest was stopped after ${gametestTimeoutSeconds}s with its tests "
+                    + "registered but none completed - the harness wedged, not the tests. "
+                    + "See ${log}")
+        }
+    }
+}
+
 // Grade the run on the log summary, not the exit code: the GameTestServer prints
 // "All N required tests passed :)" when every required test succeeds. Keep
 // expectedTests in sync with the @GameTest methods in src/gametest.
 tasks.matching { it.name == 'runGameTestServer' }.configureEach {
     def expectedTests = 6
+    if (it instanceof JavaExec) {
+        it.timeout = java.time.Duration.ofSeconds(gametestTimeoutSeconds)
+    }
+    doFirst {
+        // A stale log must never be able to answer for this run: the grader below
+        // reads it, and a killed run would otherwise be judged on its predecessor.
+        file('run/logs/latest.log').delete()
+    }
     doLast {
         def log = file('run/logs/latest.log')
         if (!log.exists()) {
@@ -209,6 +243,8 @@ tasks.matching { it.name == 'runGameTestServer' }.configureEach {
             }
         } else if ((text =~ /\d+ required tests failed/).find()) {
             problems << 'GameTest reported failed tests'
+        } else if (text.contains('tests are now running')) {
+            problems << 'the harness registered its tests but none completed'
         } else {
             problems << 'no GameTest summary found in log'
         }
@@ -220,4 +256,5 @@ tasks.matching { it.name == 'runGameTestServer' }.configureEach {
         }
         logger.lifecycle("GameTest OK: all ${expectedTests} tests passed")
     }
+    finalizedBy(reportGametestStall)
 }

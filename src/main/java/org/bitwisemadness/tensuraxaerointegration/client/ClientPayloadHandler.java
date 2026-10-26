@@ -26,12 +26,13 @@ public final class ClientPayloadHandler {
      * freshness window derives from, and the datapack palette client config can
      * override band by band.
      */
-    public static void onServerInfo(double baseline, int refreshIntervalTicks, OverlayPalette palette) {
+    public static void onServerInfo(double baseline, int refreshIntervalTicks, long refreshIntervalMillis,
+            OverlayPalette palette) {
         ClientConcentrationStore store = ClientConcentration.get().store();
         // Applied before anything is classified so the window is already the
         // server's when a value arrives.
         if (refreshIntervalTicks > 0) {
-            store.setServerRefreshInterval(refreshIntervalTicks);
+            store.setServerRefreshInterval(refreshIntervalTicks, Math.max(1L, refreshIntervalMillis));
         }
         store.setServerPalette(palette);
         // Logged once per session on purpose: a baseline the server could not
@@ -46,8 +47,9 @@ public final class ClientPayloadHandler {
             } else {
                 TensuraXaeroIntegration.LOGGER.info(
                         "Tensura baseline for this world: {} (server confirms chunks every {} ticks, "
-                                + "so values count as current for {} ticks)",
-                        baseline, store.serverRefreshIntervalTicks(), store.staleAfterTicks());
+                                + "about {} ms here, so values count as current for {} ms)",
+                        baseline, store.serverRefreshIntervalTicks(),
+                        store.serverRefreshMillis(), store.staleAfterMillis());
             }
         }
     }

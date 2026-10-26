@@ -7,6 +7,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.LongSupplier;
 import org.bitwisemadness.tensuraxaerointegration.cache.ChunkCacheKey;
 import org.bitwisemadness.tensuraxaerointegration.cache.ConcentrationCache;
 import org.bitwisemadness.tensuraxaerointegration.cache.ConcentrationEntry;
@@ -43,7 +44,11 @@ import org.bitwisemadness.tensuraxaerointegration.concentration.OverlayPalette;
  * datapack palette in {@link #setServerPalette}, the refresh cadence in
  * {@link #setServerRefreshInterval}).</p>
  *
- * <p>Time is the client tick counter, supplied by {@link #tick()}.</p>
+ * <p>Time is wall-clock milliseconds from an injectable clock, minus the time the
+ * integrated server spent paused ({@link #addPausedMillis}). A paused server
+ * confirms nothing, so paused time must not count towards staleness: otherwise
+ * every value in the world expires while the pause menu is open and comes back
+ * when it closes, which looks exactly like a value that was never in doubt.</p>
  */
 public final class ClientConcentrationStore {
 
@@ -51,25 +56,26 @@ public final class ClientConcentrationStore {
     public static final int REGION_SHIFT = 5;
 
     /**
-     * Confirmation cadence assumed until the server reports its own.
-     *
-     * <p>Matches the shipped {@code refresh.refreshIntervalTicks}, so a server
-     * that never announces its cadence (or a client that joined before the packet
-     * arrived) still treats values the way that server does.</p>
+     * How long the server says one confirmation takes, assumed until it says
+     * otherwise: the shipped 200-tick interval at a healthy 50 ms per tick.
      */
-    public static final int DEFAULT_SERVER_REFRESH_INTERVAL_TICKS = 200;
+    public static final long DEFAULT_SERVER_REFRESH_MILLIS = 10_000L;
 
     /**
      * Floor for the derived freshness window, so a server that confirms very
      * often cannot make values flicker between live and last known.
      */
-    public static final long MIN_STALE_TICKS = 100;
+    public static final long MIN_STALE_MILLIS = 3_000L;
 
     /**
-     * How many confirmation intervals a value stays current for. Two tolerates one
-     * missed heartbeat before the value is demoted.
+     * How many confirmations a value stays current for.
+     *
+     * <p>Three, not two: one beat of slack is not a margin on a server that
+     * stutters. A single "can't keep up" stall of a few seconds would otherwise
+     * push the confirmation past the window and dim a value that was never in
+     * doubt.</p>
      */
-    private static final long STALE_INTERVALS = 2L;
+    private static final long STALE_INTERVALS = 3L;
 
     /** A value as the renderers and hover line should see it. */
     public record Observation(double value, Optional<ConcentrationClassification> classification, boolean live) {
@@ -108,21 +114,57 @@ public final class ClientConcentrationStore {
     private final Map<RegionKey, Integer> regionVersions = new ConcurrentHashMap<>();
     private final Set<RegionKey> dirtyRegions = new LinkedHashSet<>();
 
-    private long tick;
-    private int serverRefreshIntervalTicks = DEFAULT_SERVER_REFRESH_INTERVAL_TICKS;
+    private final LongSupplier clock;
+
+    /** Wall-clock time this session during which the server could not confirm anything. */
+    private long pausedMillis;
+
+    private int serverRefreshIntervalTicks = 200;
+    private long serverRefreshMillis = DEFAULT_SERVER_REFRESH_MILLIS;
     private OverlayPalette serverPalette = OverlayPalette.defaults();
 
     public ClientConcentrationStore(int maxEntries) {
+        this(maxEntries, System::currentTimeMillis);
+    }
+
+    /**
+     * @param clock wall-clock source in milliseconds; injectable so the JUnit suite
+     *              can describe a stalled server without sleeping
+     */
+    ClientConcentrationStore(int maxEntries, LongSupplier clock) {
         this.cache = new ConcentrationCache(maxEntries);
+        this.clock = clock;
     }
 
-    /** Advances the client clock used for staleness. */
-    public void tick() {
-        this.tick++;
+    /**
+     * The clock this store measures freshness against: wall-clock milliseconds
+     * with paused time excluded.
+     *
+     * <p>Stamps are taken with the same offset, so excluding paused time never
+     * makes an age negative: during a pause the offset grows by exactly as much
+     * as the wall clock does, which freezes every age where it was.</p>
+     */
+    public long now() {
+        return this.clock.getAsLong() - this.pausedMillis;
     }
 
-    public long currentTick() {
-        return this.tick;
+    /**
+     * Records wall-clock time in which the server was paused and could not
+     * confirm any chunk.
+     *
+     * <p>A singleplayer pause freezes the integrated server but not the client's
+     * tick loop, so the client would otherwise age every value during a pause and
+     * dim the whole map on unpause.</p>
+     */
+    public void addPausedMillis(long millis) {
+        if (millis > 0L) {
+            this.pausedMillis += millis;
+        }
+    }
+
+    /** How much wall-clock time this session has spent paused. */
+    public long pausedMillis() {
+        return this.pausedMillis;
     }
 
     /**
@@ -144,32 +186,45 @@ public final class ClientConcentrationStore {
     }
 
     /**
-     * Records how often the server re-confirms an unchanged chunk.
+     * Records how long the server needs, in real time, to confirm an unchanged
+     * chunk again.
      *
      * <p>This is what the freshness window is derived from, so there is no second
      * client-side number that could disagree with the server: values are trusted
-     * for exactly as long as the server's own cadence justifies.</p>
+     * for exactly as long as the server's own cadence justifies. It is a duration
+     * rather than a tick count precisely because the server's ticks are not the
+     * client's ticks.</p>
      *
-     * @param ticks the server's confirmation interval, positive
+     * @param ticks        the server's confirmation interval in its own ticks, positive
+     * @param promiseMillis how long that interval really takes, positive
      */
-    public void setServerRefreshInterval(int ticks) {
+    public void setServerRefreshInterval(int ticks, long promiseMillis) {
         if (ticks <= 0) {
             throw new IllegalArgumentException("server refresh interval must be positive, was " + ticks);
         }
+        if (promiseMillis <= 0) {
+            throw new IllegalArgumentException("the refresh promise must be positive, was " + promiseMillis);
+        }
         this.serverRefreshIntervalTicks = ticks;
+        this.serverRefreshMillis = promiseMillis;
     }
 
-    /** The confirmation cadence currently in force, in client ticks. */
+    /** The confirmation cadence currently in force, in the server's ticks. */
     public int serverRefreshIntervalTicks() {
         return this.serverRefreshIntervalTicks;
     }
 
+    /** How long the server's next confirmation is expected to take, in ms. */
+    public long serverRefreshMillis() {
+        return this.serverRefreshMillis;
+    }
+
     /**
-     * How long a value counts as current, derived from the server's confirmation
-     * cadence: {@code 2 * refreshIntervalTicks}, floored at {@link #MIN_STALE_TICKS}.
+     * How long a value counts as current: three server confirmations, floored at
+     * {@link #MIN_STALE_MILLIS}.
      */
-    public long staleAfterTicks() {
-        return Math.max(MIN_STALE_TICKS, STALE_INTERVALS * this.serverRefreshIntervalTicks);
+    public long staleAfterMillis() {
+        return Math.max(MIN_STALE_MILLIS, STALE_INTERVALS * this.serverRefreshMillis);
     }
 
     /**
@@ -184,7 +239,7 @@ public final class ClientConcentrationStore {
             // server offered it. Structurally invisible to every consumer.
             return false;
         }
-        boolean changed = this.cache.put(key, value, band, this.tick);
+        boolean changed = this.cache.put(key, value, band, now());
         if (changed) {
             bumpRegion(key);
         }
@@ -208,7 +263,7 @@ public final class ClientConcentrationStore {
             bumpRegion(key);
             return true;
         }
-        boolean changed = this.cache.markUnavailable(key, this.tick);
+        boolean changed = this.cache.markUnavailable(key, now());
         if (changed) {
             bumpRegion(key);
         }
@@ -240,13 +295,13 @@ public final class ClientConcentrationStore {
      * The observation to display for a chunk: live when the server refreshed it
      * recently, otherwise the last known value. Empty when nothing is held.
      */
-    public Optional<Observation> observe(ChunkCacheKey key, long staleAfterTicks) {
+    public Optional<Observation> observe(ChunkCacheKey key, long windowMillis) {
         Optional<ConcentrationEntry> entry = this.cache.entry(key);
         if (entry.isEmpty() || !entry.get().available()) {
             return Optional.empty();
         }
         ConcentrationEntry value = entry.get();
-        boolean live = value.fresh(this.tick, staleAfterTicks);
+        boolean live = value.fresh(now(), windowMillis);
         // The band is the server's, never recomputed here: it owns the tier table.
         Optional<ConcentrationClassification> classification =
                 ConcentrationClassification.fromCode(value.band());
@@ -291,22 +346,73 @@ public final class ClientConcentrationStore {
     }
 
     /**
+     * What one expiry sweep demoted, so a caller can report why values dimmed.
+     *
+     * <p>The number matters as much as the oldest chunk: one value going quiet is
+     * a missed confirmation, a sweep that demotes dozens is the server having been
+     * unable to tick at all (a pause, a dimension change, a stall).</p>
+     *
+     * @param count           how many values became last known
+     * @param oldest          the chunk that had gone longest without a confirmation
+     * @param oldestAgeMillis that chunk's real gap, measured before it was demoted
+     */
+    public record Expiry(int count, ChunkCacheKey oldest, long oldestAgeMillis) {
+
+        public Expiry {
+            if (count <= 0) {
+                throw new IllegalArgumentException("an expiry sweep demoted at least one chunk");
+            }
+            if (oldest == null) {
+                throw new IllegalArgumentException("an expiry sweep has an oldest chunk");
+            }
+            if (oldestAgeMillis < 0L) {
+                throw new IllegalArgumentException("an age cannot be negative, was " + oldestAgeMillis);
+            }
+        }
+    }
+
+    /**
      * Demotes live values that have not been refreshed within
-     * {@code staleAfterTicks} and dirties their regions once.
+     * {@code windowMillis} and dirties their regions once.
      *
      * <p>Demotion is a visible change (bright to dim), so it has to trigger a
      * repaint; the cache reports each entry only once, so a long-idle value does
      * not repaint its region every sweep.</p>
+     *
+     * <p>The gap is measured before demoting, because a demoted entry no longer
+     * carries a stamp - reading it afterwards reports the epoch as the age.</p>
+     *
+     * @return what this sweep demoted, so a caller can report why; empty when
+     *         nothing expired
      */
-    public void expire(long staleAfterTicks) {
+    public Optional<Expiry> expire(long windowMillis) {
+        long now = now();
+        List<ChunkCacheKey> stale = new ArrayList<>();
+        ChunkCacheKey oldest = null;
+        long oldestAge = -1L;
         for (ConcentrationCache.Snapshot snapshot : this.cache.snapshot()) {
             ConcentrationEntry entry = snapshot.entry();
-            if (entry.available() && !entry.historical() && !entry.fresh(this.tick, staleAfterTicks)) {
-                if (this.cache.demote(snapshot.key())) {
-                    bumpRegion(snapshot.key());
-                }
+            if (!entry.available() || entry.historical() || entry.fresh(now, windowMillis)) {
+                continue;
+            }
+            long age = now - entry.stampMillis();
+            stale.add(snapshot.key());
+            if (age > oldestAge) {
+                oldestAge = age;
+                oldest = snapshot.key();
             }
         }
+        if (stale.isEmpty()) {
+            return Optional.empty();
+        }
+        int demoted = 0;
+        for (ChunkCacheKey key : stale) {
+            if (this.cache.demote(key)) {
+                bumpRegion(key);
+                demoted++;
+            }
+        }
+        return demoted == 0 ? Optional.empty() : Optional.of(new Expiry(demoted, oldest, oldestAge));
     }
 
     /**
@@ -362,8 +468,11 @@ public final class ClientConcentrationStore {
      * a different world must not inherit them. The next join announces both again.</p>
      */
     public void clearServerInfo() {
-        this.serverRefreshIntervalTicks = DEFAULT_SERVER_REFRESH_INTERVAL_TICKS;
+        this.serverRefreshIntervalTicks = 200;
+        this.serverRefreshMillis = DEFAULT_SERVER_REFRESH_MILLIS;
         this.serverPalette = OverlayPalette.defaults();
+        // Paused time belongs to the session that is ending; stamps are cleared too.
+        this.pausedMillis = 0L;
     }
 
     public int size() {

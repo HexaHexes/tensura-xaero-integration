@@ -107,7 +107,7 @@ Responsibilities:
   such player's queue. No packet is built per chunk; the queue is flushed once
   per tick.
 - **Periodic path.** `onServerTick` pushes the `ServerInfoPayload` (baseline and
-  refresh cadence) when it is due (600 ticks) or pending, prunes subscriptions
+  refresh cadence) when it is due (200 ticks) or pending, prunes subscriptions
   that left the player's dimension or radius, runs `reconcile` every
   `reconcileIntervalTicks`, runs the heartbeat, and flushes.
 - **Heartbeat.** A chunk parked at its ceiling never changes, so change-gated
@@ -118,7 +118,11 @@ Responsibilities:
   entries per cycle from a rotating cursor, so a player with 2 000 subscriptions
   costs a few hundred field reads every few seconds rather than a stall.
 - **Unloaded chunks.** `offerCurrent` reports a chunk that is no longer loaded as
-  unavailable (`NaN`) instead of letting its last value live on.
+  unavailable (`NaN`) instead of letting its last value live on, and says once per
+  session why it could not read one: no loaded chunk there (the player's loaded
+  area moved, or the chunk is at the edge of it), or a loaded chunk from which
+  Tensura returned no storage or no usable value (an integration fault). The client
+  sees the same `NaN` either way, so only the server can draw that distinction.
 - **Privacy.** Nothing is ever sent for a chunk the player did not subscribe to,
   and subscriptions are additionally bounded by distance and loaded state, so a
   modified client can only reach chunks it is physically standing among.
@@ -130,10 +134,17 @@ Responsibilities:
   values (`NaN` = no authoritative value right now) and a `byte[]` of band codes
   (`-1` = the server could not classify it). The band travels with the value
   because the server owns the tier table.
-- `ServerInfoPayload` (S2C): the server's configured baseline, its
-  `refreshIntervalTicks` and the datapack palette, so clients neither guess the
-  baseline nor keep a second, independent freshness number that could disagree
-  with the server, and paints bands the pack actually chose.
+- `ServerInfoPayload` (S2C): the server's configured baseline, its refresh cadence
+  in ticks **and in measured milliseconds**, and the datapack palette. Clients
+  neither guess the baseline nor keep a second, independent freshness number, and
+  paint bands the pack actually chose. The millisecond promise exists because a
+  server that cannot keep up stretches its ticks: a client-side window counted in
+  client ticks expires early against such a server, which is what made values
+  flicker between live and last known. The promise is `CadenceEstimate`: the worst
+  of the last 15 timed sweeps, extrapolated to one confirmation, floored at the
+  nominal `intervalTicks * 50 ms` and capped at four intervals so a resumed pause
+  cannot claim minutes. It is re-sent every 200 ticks, so a promise widened by a
+  stall reaches clients within one confirmation instead of up to 30 s late.
 - `PackedChunkPos`: `(x << 32) | (z & 0xFFFFFFFFL)` with sign-safe unpacking.
 
 ## 4. Client components
@@ -144,7 +155,9 @@ The session owner. On every client tick it:
 1. detects a world or dimension change and starts a new session (clearing the
    store, releasing the old dimension's subscriptions);
 2. ticks the store, and every 20 ticks expires values past the freshness window
-   the server's cadence implies (twice its `refreshIntervalTicks`);
+   the server's cadence implies (three measured confirmations of its
+   `refreshIntervalTicks`), first moving any time spent paused out of the clock —
+   a paused integrated server confirms nothing, so that time cannot age a value;
 3. re-declares its mapped set every `subscribeIntervalTicks` (and every 200 ticks
    re-sends the whole set, which is idempotent and self-healing against a server
    radius cap smaller than the client's);
@@ -155,11 +168,27 @@ The mapped set is built from `WorldMapBridge.mappedChunks(...)` and
 the configured radius around the player. A chunk that is not mapped is never
 requested.
 
+The radius is circular (`util/ChunkRadius`, shared with the server's cap and its
+subscription pruning). The maps enumerate a square, so corners are filtered out:
+the corner of a square of radius 10 is 14.1 chunks away, and a server only holds
+chunks loaded out to about its view distance, so those corners could only ever be
+answered with `NaN`. A cube of requests for data that cannot exist is what made
+unreadable chunks show up in the first place.
+
+Xaero answers that query from the layers and regions it **currently holds in
+memory**, so an eviction or a cave-layer change makes chunks that are still mapped
+on disk disappear from the set for a while. The session therefore remembers, for
+`MAPPED_MEMORY_TICKS` (60 s), every chunk the maps have reported and keeps
+subscribed to those that are still within the radius. A chunk only leaves the set
+when it leaves the radius or stays unreported for that long — otherwise the
+subscription set churned, demoted values, and re-subscribed them twenty ticks
+later, which is a visible dim and re-brighten on chunks that were never in doubt.
+
 ### `client/ClientConcentrationStore`
 Pure, Minecraft-free store (`ChunkCacheKey` → entry) with two display states.
 
 A value is either **live** (the server confirmed it within the freshness window,
-which is twice the server's announced `refreshIntervalTicks`) or
+three times the server's measured confirmation time, on a wall clock) or
 **last known** (a real earlier observation that is no longer being refreshed).
 `observe(...)` returns one `Observation` carrying the value, its band and which
 of the two it is; the renderers and the hover line never look at the raw entry.
@@ -267,6 +296,8 @@ world-map-only install loads only what exists.
 | `concentration/OverlayPalette` | `#RRGGBB` parsing, per-band ARGB in Xaero's encoding |
 | `refresh/UpdateQueue` | change detection, per-chunk minimum interval, heartbeat re-queue, bounded drain, retention pruning |
 | `refresh/ReconcileCursor` | rotating bounded slice over a set |
+| `refresh/CadenceEstimate` | measured confirmation promise: worst recent sweep, floored at nominal and capped |
+| `util/ChunkRadius` | the circular request radius, shared by the client's request and the server's cap |
 | `cache/ConcentrationFileFormat` | strict binary codec for the persisted last-known values |
 | `client/ClientConcentrationStore` | mapped-only ingress, live/last-known states, replay, region versions |
 
