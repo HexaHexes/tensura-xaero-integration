@@ -1,5 +1,7 @@
 package org.bitwisemadness.tensuraxaerointegration.cache;
 
+import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
+import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -8,6 +10,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalDouble;
 import java.util.Set;
+import org.bitwisemadness.tensuraxaerointegration.net.PackedChunkPos;
 
 /**
  * A bounded, timestamped map of chunk concentration observations.
@@ -30,6 +33,13 @@ import java.util.Set;
  * follows writes: the chunk the server is still confirming is the one that keeps
  * its slot.</p>
  *
+ * <p>Reads are also keyed by primitives. The authoritative map is written through
+ * with a {@link ChunkCacheKey}, which is fine on the write path, but a map tile
+ * rebuild asks about hundreds of chunks and must not allocate a key for each one,
+ * so every write also lands in a long-keyed index of packed chunk positions, one
+ * index per world-and-dimension scope. Reads through {@link #entryAt} touch only
+ * that index and allocate nothing.</p>
+ *
  * <p>This class never decides <em>whether</em> a chunk may be cached; that
  * decision belongs to the caller (mapped-only ingress on the client, the
  * subscription check on the server).</p>
@@ -47,8 +57,25 @@ public final class ConcentrationCache {
     public record Expired(ChunkCacheKey key, long ageMillis) {
     }
 
+    /** The world and dimension a packed chunk position is only meaningful within. */
+    private record Scope(String world, String dimension) {
+    }
+
     private final int maxEntries;
     private final LinkedHashMap<ChunkCacheKey, ConcentrationEntry> entries;
+
+    /**
+     * The allocation-free read index: packed chunk positions, per scope.
+     *
+     * <p>Held in step with {@link #entries} by {@link #write}, {@link #remove},
+     * {@link #clear} and the eviction hook, so every read answers exactly what the
+     * authoritative map holds.</p>
+     */
+    private final Map<Scope, Long2ObjectOpenHashMap<ConcentrationEntry>> byPosition = new LinkedHashMap<>();
+
+    /** Last scope read, so a repaint frame does not build a {@link Scope} per chunk. */
+    private Scope activeScope;
+    private Long2ObjectOpenHashMap<ConcentrationEntry> activePositions;
 
     /**
      * Keys whose entry is available and current: the only entries that can ever
@@ -72,6 +99,10 @@ public final class ConcentrationCache {
                 // An evicted value must leave the live set too, or the set would
                 // keep growing with keys the map no longer holds.
                 live.remove(eldest.getKey());
+                // And the read index, or a lookup would answer with a value the
+                // authoritative map has already dropped.
+                positionsFor(eldest.getKey().world(), eldest.getKey().dimension())
+                        .remove(PackedChunkPos.pack(eldest.getKey().chunkX(), eldest.getKey().chunkZ()));
                 return true;
             }
         };
@@ -130,12 +161,31 @@ public final class ConcentrationCache {
         // property of writes while leaving every read a plain lookup.
         this.entries.remove(key);
         this.entries.put(key, next);
+        positionsFor(key.world(), key.dimension())
+                .put(PackedChunkPos.pack(key.chunkX(), key.chunkZ()), next);
         if (next.available() && !next.historical()) {
             this.live.add(key);
         } else {
             this.live.remove(key);
         }
         return current == null || !sameObservation(current, next);
+    }
+
+    /** The packed-position index for a scope, reusing the last one asked for. */
+    private Long2ObjectOpenHashMap<ConcentrationEntry> positionsFor(String world, String dimension) {
+        Scope scope = this.activeScope;
+        if (scope != null && scope.world().equals(world) && scope.dimension().equals(dimension)) {
+            return this.activePositions;
+        }
+        Scope fresh = new Scope(world, dimension);
+        Long2ObjectOpenHashMap<ConcentrationEntry> positions = this.byPosition.get(fresh);
+        if (positions == null) {
+            positions = new Long2ObjectOpenHashMap<>();
+            this.byPosition.put(fresh, positions);
+        }
+        this.activeScope = fresh;
+        this.activePositions = positions;
+        return positions;
     }
 
     /**
@@ -204,6 +254,18 @@ public final class ConcentrationCache {
     }
 
     /**
+     * The stored entry for a chunk addressed by primitives, or {@code null}.
+     *
+     * <p>What the paint path reads: same answer as
+     * {@link #entryOrNull(ChunkCacheKey)}, without building a key for every chunk
+     * of every tile rebuild.</p>
+     */
+    public synchronized ConcentrationEntry entryAt(String world, String dimension, int chunkX, int chunkZ) {
+        Long2ObjectMap<ConcentrationEntry> positions = positionsFor(world, dimension);
+        return positions.get(PackedChunkPos.pack(chunkX, chunkZ));
+    }
+
+    /**
      * Whether anything displayable is held for the chunk, current or remembered.
      *
      * <p>The version a highlighter needs when it only has to answer "paint or
@@ -211,6 +273,16 @@ public final class ConcentrationCache {
      */
     public synchronized boolean hasAvailable(ChunkCacheKey key) {
         ConcentrationEntry entry = this.entries.get(key);
+        return entry != null && entry.available();
+    }
+
+    /**
+     * Whether a chunk addressed by primitives holds anything displayable.
+     *
+     * <p>The allocation-free form of {@link #hasAvailable(ChunkCacheKey)}.</p>
+     */
+    public synchronized boolean hasAvailableAt(String world, String dimension, int chunkX, int chunkZ) {
+        ConcentrationEntry entry = entryAt(world, dimension, chunkX, chunkZ);
         return entry != null && entry.available();
     }
 
@@ -234,6 +306,8 @@ public final class ConcentrationCache {
 
     public synchronized boolean remove(ChunkCacheKey key) {
         this.live.remove(key);
+        positionsFor(key.world(), key.dimension())
+                .remove(PackedChunkPos.pack(key.chunkX(), key.chunkZ()));
         return this.entries.remove(key) != null;
     }
 
@@ -241,6 +315,9 @@ public final class ConcentrationCache {
     public synchronized void clear() {
         this.entries.clear();
         this.live.clear();
+        this.byPosition.clear();
+        this.activeScope = null;
+        this.activePositions = null;
     }
 
     public synchronized int size() {

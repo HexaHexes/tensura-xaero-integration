@@ -139,10 +139,37 @@ public final class ClientConcentration {
     /** One entry is enough: a map asks for thousands of chunks of one dimension. */
     private volatile DimensionMemo dimensionMemo;
 
+    /**
+     * The world token this session keys chunks by.
+     *
+     * <p>Never blank, so it can be handed straight to the cache's primitive reads;
+     * the field itself is returned, so this allocates nothing.</p>
+     */
+    private String keyWorldToken() {
+        return this.worldToken.isBlank() ? "unknown" : this.worldToken;
+    }
+
     /** Builds the cache key for a chunk in a dimension, scoped to this session's world. */
     public ChunkCacheKey key(ResourceKey<Level> dimension, int chunkX, int chunkZ) {
-        String token = this.worldToken.isBlank() ? "unknown" : this.worldToken;
-        return new ChunkCacheKey(token, dimensionIdOf(dimension), chunkX, chunkZ);
+        return new ChunkCacheKey(keyWorldToken(), dimensionIdOf(dimension), chunkX, chunkZ);
+    }
+
+    /**
+     * The paint state for a chunk, addressed the way a map hands it over.
+     *
+     * <p>A highlighter gets a dimension and chunk coordinates for every visible
+     * chunk on every tile rebuild; going through {@link #key} made a record for
+     * each one, so this reads the store by primitive position instead.</p>
+     */
+    public int paintState(ResourceKey<Level> dimension, int chunkX, int chunkZ) {
+        ClientConcentrationStore store = store();
+        return store.paintState(keyWorldToken(), dimensionIdOf(dimension), chunkX, chunkZ,
+                store.staleAfterMillis());
+    }
+
+    /** Whether a chunk holds anything displayable, without building a key. */
+    public boolean hasValue(ResourceKey<Level> dimension, int chunkX, int chunkZ) {
+        return store().hasValue(keyWorldToken(), dimensionIdOf(dimension), chunkX, chunkZ);
     }
 
     /**

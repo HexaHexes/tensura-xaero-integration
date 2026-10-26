@@ -343,7 +343,21 @@ public final class ClientConcentrationStore {
      *         {@link #NO_PAINT}
      */
     public int paintState(ChunkCacheKey key, long windowMillis) {
-        ConcentrationEntry entry = this.cache.entryOrNull(key);
+        return paintState(key.world(), key.dimension(), key.chunkX(), key.chunkZ(), windowMillis);
+    }
+
+    /**
+     * The paint state for a chunk addressed by primitives.
+     *
+     * <p>The form the map highlighters use: they are handed a dimension and chunk
+     * coordinates by Xaero, and building a key for each visible chunk on each tile
+     * rebuild was the last allocation on that path.</p>
+     *
+     * @return {@link #NO_PAINT}, or the packed band and liveness; see
+     *         {@link #paintState(ChunkCacheKey, long)}
+     */
+    public int paintState(String world, String dimension, int chunkX, int chunkZ, long windowMillis) {
+        ConcentrationEntry entry = this.cache.entryAt(world, dimension, chunkX, chunkZ);
         if (entry == null || !entry.available()) {
             return NO_PAINT;
         }
@@ -465,6 +479,16 @@ public final class ClientConcentrationStore {
      */
     public boolean hasValue(ChunkCacheKey key) {
         return this.cache.hasAvailable(key);
+    }
+
+    /**
+     * Whether a chunk addressed by primitives holds anything displayable.
+     *
+     * <p>The form {@code chunkIsHighlit} uses, so a map tile rebuild never builds a
+     * key.</p>
+     */
+    public boolean hasValue(String world, String dimension, int chunkX, int chunkZ) {
+        return this.cache.hasAvailableAt(world, dimension, chunkX, chunkZ);
     }
 
     /**

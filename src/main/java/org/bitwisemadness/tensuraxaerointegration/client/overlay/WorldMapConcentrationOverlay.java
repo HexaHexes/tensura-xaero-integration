@@ -72,8 +72,7 @@ public final class WorldMapConcentrationOverlay extends ChunkHighlighter {
     public boolean chunkIsHighlit(ResourceKey<Level> dimension, int chunkX, int chunkZ) {
         // Xaero asks this *and* getColors for every chunk it draws, so it answers
         // without building an observation: no Optional, no record, no palette.
-        return enabled() && ClientConcentration.get().store()
-                .hasValue(ClientConcentration.get().key(dimension, chunkX, chunkZ));
+        return enabled() && ClientConcentration.get().hasValue(dimension, chunkX, chunkZ);
     }
 
     @Override
@@ -84,8 +83,7 @@ public final class WorldMapConcentrationOverlay extends ChunkHighlighter {
         // One packed read: the number is not needed to paint, only the band and
         // whether the value is still current.
         ClientConcentrationStore store = ClientConcentration.get().store();
-        int state = store.paintState(
-                ClientConcentration.get().key(dimension, chunkX, chunkZ), store.staleAfterMillis());
+        int state = ClientConcentration.get().paintState(dimension, chunkX, chunkZ);
         if (state == ClientConcentrationStore.NO_PAINT) {
             return null;
         }

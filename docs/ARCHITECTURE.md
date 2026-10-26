@@ -190,9 +190,22 @@ Pure, Minecraft-free store (`ChunkCacheKey` → entry) with two display states.
 A value is either **live** (the server confirmed it within the freshness window,
 three times the server's measured confirmation time, on a wall clock) or
 **last known** (a real earlier observation that is no longer being refreshed).
-`observe(...)` returns one `Observation` carrying the value, its band and which
-of the two it is; the renderers and the hover line never look at the raw entry.
-The four rules that make this safe:
+Three reads serve it, and all of them report the same state:
+
+- `observe(...)` returns one `Observation` with the value, its band and which of
+  the two states it is in. The semantic form, and the oracle the JUnit suite uses.
+- `paintState(...)` packs the band and the liveness into one `int` (`NO_PAINT` when
+  there is nothing), which is all a highlighter needs: the number never affects a
+  colour. This is what the map paint path reads, per visible chunk per tile rebuild.
+- `rawEntryOrNull(...)` hands back the immutable entry for the hover line, which does
+  need the number as well, on every map frame.
+
+Both hot reads are addressed by `(world token, dimension, chunk x, chunk z)` rather
+than by a key. `ConcentrationCache` keeps a long-keyed index of packed chunk positions
+per world-and-dimension scope alongside its write-ordered map - the map stays
+authoritative for recency, eviction and the on-disk snapshot, and every write, removal,
+eviction and clear updates both - so neither a paint nor a hover lookup allocates a
+`ChunkCacheKey`. The four rules that make this safe:
 
 - `offer(key, mapped, value, band)` **refuses the write when `mapped` is false**,
   so an unmapped chunk can never enter the cache even if a packet named it. The

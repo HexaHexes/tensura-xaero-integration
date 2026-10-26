@@ -227,6 +227,77 @@ class CacheKeyAndCacheTest {
         assertTrue(cache.freshValue(OVERWORLD_SAVE_A, 5, 100).isEmpty());
     }
 
+    /**
+     * The paint path reads by packed position, so that index has to answer exactly
+     * what the key-addressed map does - through every way an entry can change.
+     */
+    @Test
+    void packed_reads_agree_with_the_key_reads() {
+        ConcentrationCache cache = new ConcentrationCache(8);
+        String world = OVERWORLD_SAVE_A.world();
+        String dimension = OVERWORLD_SAVE_A.dimension();
+        int x = OVERWORLD_SAVE_A.chunkX();
+        int z = OVERWORLD_SAVE_A.chunkZ();
+
+        assertTrue(cache.entryAt(world, dimension, x, z) == null, "nothing stored yet");
+        assertFalse(cache.hasAvailableAt(world, dimension, x, z));
+
+        cache.put(OVERWORLD_SAVE_A, 600.0, BAND, 5);
+        assertEquals(cache.entryOrNull(OVERWORLD_SAVE_A), cache.entryAt(world, dimension, x, z));
+        assertTrue(cache.hasAvailableAt(world, dimension, x, z));
+
+        cache.demote(OVERWORLD_SAVE_A);
+        assertEquals(cache.entryOrNull(OVERWORLD_SAVE_A), cache.entryAt(world, dimension, x, z),
+                "a demotion must be visible to the paint read");
+        assertTrue(cache.hasAvailableAt(world, dimension, x, z), "a remembered value is still displayable");
+
+        cache.markUnavailable(OVERWORLD_SAVE_A, 6);
+        assertFalse(cache.hasAvailableAt(world, dimension, x, z));
+
+        cache.remove(OVERWORLD_SAVE_A);
+        assertTrue(cache.entryAt(world, dimension, x, z) == null);
+    }
+
+    @Test
+    void packed_reads_keep_worlds_and_dimensions_apart() {
+        ConcentrationCache cache = new ConcentrationCache(8);
+        ChunkCacheKey nether = new ChunkCacheKey("save-a", "minecraft:the_nether", 3, -7);
+        ChunkCacheKey otherSave = OVERWORLD_SAVE_A.withWorld("save-b");
+        cache.put(OVERWORLD_SAVE_A, 600.0, BAND, 1);
+        cache.put(nether, 1200.0, BAND, 1);
+        cache.put(otherSave, 900.0, BAND, 1);
+
+        assertEquals(600.0, cache.entryAt("save-a", "minecraft:overworld", 3, -7).value());
+        assertEquals(1200.0, cache.entryAt("save-a", "minecraft:the_nether", 3, -7).value());
+        assertEquals(900.0, cache.entryAt("save-b", "minecraft:overworld", 3, -7).value());
+    }
+
+    @Test
+    void an_evicted_chunk_leaves_the_packed_index() {
+        ConcentrationCache cache = new ConcentrationCache(2);
+        ChunkCacheKey a = new ChunkCacheKey("s", "d", 1, 1);
+        ChunkCacheKey b = new ChunkCacheKey("s", "d", 2, 2);
+        ChunkCacheKey c = new ChunkCacheKey("s", "d", 3, 3);
+        cache.put(a, 1.0, BAND, 0);
+        cache.put(b, 2.0, BAND, 0);
+        cache.put(c, 3.0, BAND, 0); // evicts a
+
+        assertTrue(cache.entryAt("s", "d", 1, 1) == null, "a paint read must not resurrect an evicted value");
+        assertFalse(cache.hasAvailableAt("s", "d", 1, 1));
+        assertEquals(2.0, cache.entryAt("s", "d", 2, 2).value());
+        assertEquals(3.0, cache.entryAt("s", "d", 3, 3).value());
+    }
+
+    @Test
+    void clearing_empties_the_packed_index() {
+        ConcentrationCache cache = new ConcentrationCache(8);
+        cache.put(OVERWORLD_SAVE_A, 600.0, BAND, 1);
+        cache.clear();
+
+        assertTrue(cache.entryAt("save-a", "minecraft:overworld", 3, -7) == null,
+                "the next world must not read the previous world's values");
+    }
+
     @Test
     void a_replayed_value_never_overwrites_a_live_one() {
         ConcentrationCache cache = new ConcentrationCache(8);

@@ -53,10 +53,9 @@ public final class MinimapConcentrationOverlay extends ChunkHighlighter {
         if (!ClientConfig.minimapOverlayEnabled()) {
             return false;
         }
-        // Answers without building an observation; the minimap asks this and
-        // getColors for the same chunk every time it writes a tile.
-        return ClientConcentration.get().store()
-                .hasValue(ClientConcentration.get().key(dimension, chunkX, chunkZ));
+        // Answers without building an observation or a key; the minimap asks this
+        // and getColors for the same chunk every time it writes a tile.
+        return ClientConcentration.get().hasValue(dimension, chunkX, chunkZ);
     }
 
     @Override
@@ -66,8 +65,7 @@ public final class MinimapConcentrationOverlay extends ChunkHighlighter {
         }
         // One packed read: painting needs the band and the liveness, not the number.
         ClientConcentrationStore store = ClientConcentration.get().store();
-        int state = store.paintState(
-                ClientConcentration.get().key(dimension, chunkX, chunkZ), store.staleAfterMillis());
+        int state = ClientConcentration.get().paintState(dimension, chunkX, chunkZ);
         if (state == ClientConcentrationStore.NO_PAINT) {
             return null;
         }

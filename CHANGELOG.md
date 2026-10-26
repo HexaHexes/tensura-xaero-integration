@@ -47,6 +47,14 @@ separately below.
   Xaero's `getChunkHighlitColor` copies those five entries into its own result store
   before returning, and per thread because the map's render and writer threads both
   ask.
+- **The paint path no longer builds a cache key per chunk.** `ConcentrationCache` is
+  authoritative on `ChunkCacheKey` because eviction order, the live set and the on-disk
+  snapshot all need it, but a tile rebuild asks about hundreds of chunks and a record
+  per lookup was all that was left. Every write now also lands in a long-keyed index of
+  packed chunk positions, scoped per world and dimension, and the highlighters read
+  through it (`entryAt`/`hasAvailableAt`, and `paintState`/`hasValue` on the store, which
+  take the world, dimension and coordinates instead of a key). Write, removal, eviction
+  and clear keep both structures in step.
 - **The hover path allocates nothing per frame either.** `HoverText.describe` runs on
   every map frame and still went through `observe`, paying an `Optional` for the entry,
   an `Observation` and another `Optional` for the band on each frame. It now reads the

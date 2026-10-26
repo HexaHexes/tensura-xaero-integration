@@ -170,6 +170,10 @@ dependencies {
     // The tier parser is pure Gson; Minecraft supplies it at runtime, but the
     // plain JUnit classpath does not. Same version Minecraft ships.
     testImplementation 'com.google.code.gson:gson:2.10.1'
+    // The cache's allocation-free reads are keyed by packed positions; Minecraft
+    // supplies fastutil at runtime, but the plain JUnit classpath does not. Same
+    // version Minecraft ships.
+    testImplementation 'it.unimi.dsi:fastutil:8.5.12'
 }
 
 // Stage Tensura and its closure into the run's production-style mods/ folder,
