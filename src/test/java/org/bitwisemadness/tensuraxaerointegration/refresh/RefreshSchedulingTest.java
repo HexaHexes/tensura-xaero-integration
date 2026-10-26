@@ -15,37 +15,50 @@ class RefreshSchedulingTest {
 
     private static final ChunkCacheKey A = new ChunkCacheKey("s", "minecraft:overworld", 0, 0);
     private static final ChunkCacheKey B = new ChunkCacheKey("s", "minecraft:overworld", 1, 0);
+    private static final int BAND = 1;
+    private static final int UNCLASSIFIED = -1;
 
     // --- update queue -------------------------------------------------------
 
     @Test
     void an_unchanged_value_is_not_queued_twice() {
         UpdateQueue queue = new UpdateQueue();
-        assertTrue(queue.offerIfChanged(A, 600.0, 0));
+        assertTrue(queue.offerIfChanged(A, 600.0, BAND, 0));
         assertEquals(1, queue.takeReady(0, 0, 10).size());
-        assertFalse(queue.offerIfChanged(A, 600.0, 1), "same value as last sent");
+        assertFalse(queue.offerIfChanged(A, 600.0, BAND, 1), "same value and band as last sent");
         assertTrue(queue.takeReady(1, 0, 10).isEmpty());
     }
 
     @Test
     void a_changed_value_is_queued_again() {
         UpdateQueue queue = new UpdateQueue();
-        queue.offerIfChanged(A, 600.0, 0);
+        queue.offerIfChanged(A, 600.0, BAND, 0);
         queue.takeReady(0, 0, 10);
-        assertTrue(queue.offerIfChanged(A, 650.0, 1));
+        assertTrue(queue.offerIfChanged(A, 650.0, BAND, 1));
         List<UpdateQueue.Update> ready = queue.takeReady(1, 0, 10);
         assertEquals(1, ready.size());
         assertEquals(650.0, ready.get(0).value());
     }
 
     @Test
+    void a_rebanded_chunk_is_queued_even_with_the_same_value() {
+        UpdateQueue queue = new UpdateQueue();
+        queue.offerIfChanged(A, 600.0, BAND, 0);
+        queue.takeReady(0, 0, 10);
+        // The datapack was reloaded and the same concentration now sits in a
+        // different band: the client has to repaint, so this is a change.
+        assertTrue(queue.offerIfChanged(A, 600.0, BAND + 1, 1));
+        assertEquals(BAND + 1, queue.takeReady(1, 0, 10).get(0).band());
+    }
+
+    @Test
     void changes_inside_the_minimum_interval_wait_and_keep_the_latest_value() {
         UpdateQueue queue = new UpdateQueue();
-        queue.offerIfChanged(A, 600.0, 0);
+        queue.offerIfChanged(A, 600.0, BAND, 0);
         queue.takeReady(0, 20, 10);
 
-        queue.offerIfChanged(A, 610.0, 5);
-        queue.offerIfChanged(A, 620.0, 10);
+        queue.offerIfChanged(A, 610.0, BAND, 5);
+        queue.offerIfChanged(A, 620.0, BAND, 10);
         assertTrue(queue.takeReady(10, 20, 10).isEmpty(), "still inside the interval");
         assertEquals(1, queue.pendingCount(), "one pending value per chunk, not three");
 
@@ -57,19 +70,19 @@ class RefreshSchedulingTest {
     @Test
     void unavailability_deduplicates_like_a_value() {
         UpdateQueue queue = new UpdateQueue();
-        assertTrue(queue.offerIfChanged(A, Double.NaN, 0));
+        assertTrue(queue.offerIfChanged(A, Double.NaN, UNCLASSIFIED, 0));
         assertEquals(1, queue.takeReady(0, 0, 10).size());
-        assertFalse(queue.offerIfChanged(A, Double.NaN, 1));
+        assertFalse(queue.offerIfChanged(A, Double.NaN, UNCLASSIFIED, 1));
         assertTrue(queue.takeReady(1, 0, 10).isEmpty());
         // A real value after unavailability is a change again.
-        assertTrue(queue.offerIfChanged(A, 500.0, 2));
+        assertTrue(queue.offerIfChanged(A, 500.0, UNCLASSIFIED, 2));
     }
 
     @Test
     void a_drain_is_bounded_per_call() {
         UpdateQueue queue = new UpdateQueue();
         for (int i = 0; i < 10; i++) {
-            queue.offerIfChanged(new ChunkCacheKey("s", "d", i, 0), i, 0);
+            queue.offerIfChanged(new ChunkCacheKey("s", "d", i, 0), i, BAND, 0);
         }
         assertEquals(3, queue.takeReady(0, 0, 3).size());
         assertEquals(3, queue.takeReady(0, 0, 3).size());
@@ -80,8 +93,8 @@ class RefreshSchedulingTest {
     @Test
     void pruning_forgets_unsubscribed_chunks() {
         UpdateQueue queue = new UpdateQueue();
-        queue.offerIfChanged(A, 1.0, 0);
-        queue.offerIfChanged(B, 2.0, 0);
+        queue.offerIfChanged(A, 1.0, BAND, 0);
+        queue.offerIfChanged(B, 2.0, BAND, 0);
         Set<ChunkCacheKey> keep = new LinkedHashSet<>();
         keep.add(A);
         queue.retainOnly(keep);
@@ -93,20 +106,21 @@ class RefreshSchedulingTest {
     @Test
     void an_unchanged_value_is_confirmed_again_by_a_refresh() {
         UpdateQueue queue = new UpdateQueue();
-        queue.offerIfChanged(A, 600.0, 0);
+        queue.offerIfChanged(A, 600.0, BAND, 0);
         queue.takeReady(0, 0, 10);
 
         assertTrue(queue.dueForRefresh(200, 200).contains(A), "a settled chunk is due");
-        queue.offerRefresh(A, 600.0);
+        queue.offerRefresh(A, 600.0, BAND);
         List<UpdateQueue.Update> ready = queue.takeReady(200, 20, 10);
         assertEquals(1, ready.size(), "the same value is sent again on purpose");
         assertEquals(600.0, ready.get(0).value());
+        assertEquals(BAND, ready.get(0).band());
     }
 
     @Test
     void a_recently_sent_chunk_is_not_due_yet() {
         UpdateQueue queue = new UpdateQueue();
-        queue.offerIfChanged(A, 600.0, 0);
+        queue.offerIfChanged(A, 600.0, BAND, 0);
         queue.takeReady(0, 0, 10);
         assertTrue(queue.dueForRefresh(199, 200).isEmpty());
         assertEquals(1, queue.dueForRefresh(200, 200).size());
@@ -115,7 +129,7 @@ class RefreshSchedulingTest {
     @Test
     void a_chunk_that_was_never_sent_waits_for_its_first_value() {
         UpdateQueue queue = new UpdateQueue();
-        queue.offerIfChanged(A, 600.0, 0);
+        queue.offerIfChanged(A, 600.0, BAND, 0);
         // Pending, so the heartbeat leaves it to the normal drain.
         assertTrue(queue.dueForRefresh(10_000, 200).isEmpty());
     }
@@ -123,7 +137,7 @@ class RefreshSchedulingTest {
     @Test
     void a_disabled_refresh_interval_does_nothing() {
         UpdateQueue queue = new UpdateQueue();
-        queue.offerIfChanged(A, 600.0, 0);
+        queue.offerIfChanged(A, 600.0, BAND, 0);
         queue.takeReady(0, 0, 10);
         assertTrue(queue.dueForRefresh(10_000, 0).isEmpty());
     }
@@ -132,7 +146,7 @@ class RefreshSchedulingTest {
     void last_sent_value_is_visible_for_reconciliation() {
         UpdateQueue queue = new UpdateQueue();
         assertTrue(queue.lastSentValue(A).isEmpty());
-        queue.offerIfChanged(A, 42.0, 0);
+        queue.offerIfChanged(A, 42.0, BAND, 0);
         queue.takeReady(0, 0, 1);
         assertEquals(42.0, queue.lastSentValue(A).getAsDouble());
     }

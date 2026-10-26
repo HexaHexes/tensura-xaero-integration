@@ -1,5 +1,7 @@
 package org.bitwisemadness.tensuraxaerointegration.concentration;
 
+import java.util.Optional;
+
 /**
  * A presentation band for an ambient magicule concentration.
  *
@@ -36,5 +38,45 @@ public enum ConcentrationClassification {
     /** Translation key for the band's display name. */
     public String translationKey() {
         return "tensura_xaero_integration.classification." + this.key;
+    }
+
+    /** The datapack/JSON name of this band, e.g. {@code slightly_elevated}. */
+    public String key() {
+        return this.key;
+    }
+
+    /**
+     * The stable wire/persistence code of this band: its ordinal.
+     *
+     * <p>Fixed by declaration order, so it is safe to send over the network and
+     * to write to disk. Never reorder the enum; add new bands at the end.</p>
+     */
+    public int code() {
+        return ordinal();
+    }
+
+    /**
+     * The band for a wire/persistence code.
+     *
+     * @return empty for {@code -1} ("no band") or any unknown code, so data from
+     *         a newer or corrupted source is shown unclassified instead of
+     *         guessed
+     */
+    public static Optional<ConcentrationClassification> fromCode(int code) {
+        ConcentrationClassification[] values = values();
+        if (code < 0 || code >= values.length) {
+            return Optional.empty();
+        }
+        return Optional.of(values[code]);
+    }
+
+    /** Looks a band up by its JSON/datapack key. */
+    public static Optional<ConcentrationClassification> fromKey(String key) {
+        for (ConcentrationClassification value : values()) {
+            if (value.key.equals(key)) {
+                return Optional.of(value);
+            }
+        }
+        return Optional.empty();
     }
 }

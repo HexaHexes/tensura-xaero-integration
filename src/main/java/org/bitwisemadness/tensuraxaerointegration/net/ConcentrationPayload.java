@@ -16,11 +16,16 @@ import org.bitwisemadness.tensuraxaerointegration.TensuraXaeroIntegration;
  * fills this payload from a player's own subscription set, so no chunk the client
  * did not declare mapped is ever named here.</p>
  *
+ * <p>The band travels with the value because the server owns the tier table: it
+ * is the only side that knows a dimension's datapack baseline, and deciding the
+ * band per client would let two players see different tiers for one chunk.</p>
+ *
  * @param dimension the dimension the entries belong to
  * @param chunks    packed chunk positions
  * @param values    one value per chunk, NaN for unavailable
+ * @param bands     one band code per chunk ({@code -1} = not classified)
  */
-public record ConcentrationPayload(ResourceLocation dimension, long[] chunks, double[] values)
+public record ConcentrationPayload(ResourceLocation dimension, long[] chunks, double[] values, byte[] bands)
         implements CustomPacketPayload {
 
     public static final Type<ConcentrationPayload> TYPE =
@@ -35,6 +40,9 @@ public record ConcentrationPayload(ResourceLocation dimension, long[] chunks, do
                 }
                 for (double value : payload.values) {
                     buffer.writeDouble(value);
+                }
+                for (byte band : payload.bands) {
+                    buffer.writeByte(band);
                 }
             },
             buffer -> {
@@ -52,21 +60,27 @@ public record ConcentrationPayload(ResourceLocation dimension, long[] chunks, do
                 for (int i = 0; i < count; i++) {
                     values[i] = buffer.readDouble();
                 }
-                return new ConcentrationPayload(dimension, chunks, values);
+                byte[] bands = new byte[count];
+                for (int i = 0; i < count; i++) {
+                    bands[i] = buffer.readByte();
+                }
+                return new ConcentrationPayload(dimension, chunks, values, bands);
             });
 
     public ConcentrationPayload {
         Objects.requireNonNull(dimension, "dimension");
         Objects.requireNonNull(chunks, "chunks");
         Objects.requireNonNull(values, "values");
-        if (chunks.length != values.length) {
-            throw new IllegalArgumentException("chunks and values must be equal length");
+        Objects.requireNonNull(bands, "bands");
+        if (chunks.length != values.length || chunks.length != bands.length) {
+            throw new IllegalArgumentException("chunks, values and bands must be equal length");
         }
         if (chunks.length > NetworkLimits.MAX_UPDATE_ENTRIES) {
             throw new IllegalArgumentException("too many chunks in one update payload: " + chunks.length);
         }
         chunks = chunks.clone();
         values = values.clone();
+        bands = bands.clone();
     }
 
     @Override
@@ -77,6 +91,11 @@ public record ConcentrationPayload(ResourceLocation dimension, long[] chunks, do
     @Override
     public double[] values() {
         return this.values.clone();
+    }
+
+    @Override
+    public byte[] bands() {
+        return this.bands.clone();
     }
 
     @Override

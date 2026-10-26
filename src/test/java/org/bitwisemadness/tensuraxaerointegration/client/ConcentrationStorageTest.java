@@ -19,9 +19,9 @@ class ConcentrationStorageTest {
     Path gameDirectory;
 
     private static ConcentrationFileFormat.Contents contents() {
-        return new ConcentrationFileFormat.Contents(500.0, List.of(
-                new ConcentrationFileFormat.Row("minecraft:overworld", 34, -3, 600.0),
-                new ConcentrationFileFormat.Row("minecraft:the_nether", -7, 900, 12_500.5)));
+        return new ConcentrationFileFormat.Contents(List.of(
+                new ConcentrationFileFormat.Row("minecraft:overworld", 34, -3, 600.0, 1),
+                new ConcentrationFileFormat.Row("minecraft:the_nether", -7, 900, 12_500.5, -1)));
     }
 
     @Test

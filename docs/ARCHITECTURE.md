@@ -68,6 +68,13 @@ which would turn "no data" into a plausible-looking fake value. A chunk that is
 not loaded is reported unavailable; nothing is ever loaded or generated to
 answer a query.
 
+### `tiers/TierReloadListener`
+Loads `data/<namespace>/magicule_tiers/*.json` on world load and on `/reload`
+(`AddReloadListenerEvent`) and swaps the table in `tiers/MagiculeTiers`. Every
+shipped dimension has an entry; a dimension no pack describes falls back to
+Tensura's own baseline with the default ladder. Classification itself happens in
+`ConcentrationServer`, so the same chunk gets the same band for every player.
+
 ### `tensura/TensuraTickObserver`
 Registers a listener on Tensura's `TensuraLevelEvents.CHUNK_TICK_POST` (an
 Architectury event), guarded by `ModList`. It is registered once and forwards
@@ -120,10 +127,13 @@ Responsibilities:
 - `SubscriptionPayload` (C2S): dimension id, `subscribe` flag, `long[]` packed
   chunk positions. Packets are capped at `NetworkLimits.MAX_SUBSCRIBE_CHUNKS`.
 - `ConcentrationPayload` (S2C): dimension id, `long[]` positions, `double[]`
-  values, `NaN` meaning "no authoritative value right now".
-- `ServerInfoPayload` (S2C): the server's configured baseline and its
-  `refreshIntervalTicks`, so clients neither guess the baseline nor keep a
-  second, independent freshness number that could disagree with the server.
+  values (`NaN` = no authoritative value right now) and a `byte[]` of band codes
+  (`-1` = the server could not classify it). The band travels with the value
+  because the server owns the tier table.
+- `ServerInfoPayload` (S2C): the server's configured baseline, its
+  `refreshIntervalTicks` and the datapack palette, so clients neither guess the
+  baseline nor keep a second, independent freshness number that could disagree
+  with the server, and paints bands the pack actually chose.
 - `PackedChunkPos`: `(x << 32) | (z & 0xFFFFFFFFL)` with sign-safe unpacking.
 
 ## 4. Client components
@@ -155,8 +165,9 @@ which is twice the server's announced `refreshIntervalTicks`) or
 of the two it is; the renderers and the hover line never look at the raw entry.
 The four rules that make this safe:
 
-- `offer(key, mapped, value)` **refuses the write when `mapped` is false**, so an
-  unmapped chunk can never enter the cache even if a packet named it.
+- `offer(key, mapped, value, band)` **refuses the write when `mapped` is false**,
+  so an unmapped chunk can never enter the cache even if a packet named it. The
+  band is stored, never recomputed: tiers are the server's decision.
 - `demote(key)` keeps the number but drops it to last-known, and `expire()` does
   the same for anything past that window. Demotion is a visible change, so
   it bumps the region version exactly once - the map repaints from bright to dim
@@ -247,7 +258,11 @@ world-map-only install loads only what exists.
 | `cache/ConcentrationEntry` | value, mapped flag, timestamps, staleness |
 | `cache/ConcentrationCache` | bounded map with LRU-ish eviction and invalidation |
 | `cache/RegionKey` | 32×32-chunk region identity used for repaint invalidation |
-| `concentration/ConcentrationThresholds` | baseline-relative band boundaries, validated to increase |
+| `concentration/ConcentrationThresholds` | baseline-relative band boundaries, validated to increase (the server's ladder, from the datapack) |
+| `tiers/DimensionTier` | one dimension's normal concentration and band ladder |
+| `tiers/TierTable` | the loaded table plus palette, with the fallback for unlisted dimensions |
+| `tiers/TierParser` | the datapack schema: validation, merging, problem reporting |
+| `tiers/MagiculeTiers` | the table in force, swapped whole on reload |
 | `concentration/ConcentrationClassification` | the five presentation bands |
 | `concentration/OverlayPalette` | `#RRGGBB` parsing, per-band ARGB in Xaero's encoding |
 | `refresh/UpdateQueue` | change detection, per-chunk minimum interval, heartbeat re-queue, bounded drain, retention pruning |

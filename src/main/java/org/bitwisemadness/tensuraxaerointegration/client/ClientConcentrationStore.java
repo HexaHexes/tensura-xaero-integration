@@ -12,7 +12,7 @@ import org.bitwisemadness.tensuraxaerointegration.cache.ConcentrationCache;
 import org.bitwisemadness.tensuraxaerointegration.cache.ConcentrationEntry;
 import org.bitwisemadness.tensuraxaerointegration.cache.RegionKey;
 import org.bitwisemadness.tensuraxaerointegration.concentration.ConcentrationClassification;
-import org.bitwisemadness.tensuraxaerointegration.concentration.ConcentrationThresholds;
+import org.bitwisemadness.tensuraxaerointegration.concentration.OverlayPalette;
 
 /**
  * The client's only view of concentration data, and the single place that
@@ -36,6 +36,12 @@ import org.bitwisemadness.tensuraxaerointegration.concentration.ConcentrationThr
  * only happens when a value or its state really changed, and the world-map
  * highlighter can answer {@code calculateRegionHash} in constant time from the
  * version.</p>
+ *
+ * <p>The band a value is painted with is whatever the server classified it as;
+ * this class stores it and never derives one. Only the display palette and the
+ * freshness window are client-side, and both are seeded from the server (the
+ * datapack palette in {@link #setServerPalette}, the refresh cadence in
+ * {@link #setServerRefreshInterval}).</p>
  *
  * <p>Time is the client tick counter, supplied by {@link #tick()}.</p>
  */
@@ -81,12 +87,19 @@ public final class ClientConcentrationStore {
         }
     }
 
-    /** One remembered value, used to build the on-disk snapshot and to replay it. */
-    public record StoredValue(ChunkCacheKey key, double value) {
+    /**
+     * One remembered value, used to build the on-disk snapshot and to replay it.
+     *
+     * @param band the server's band code when the value was observed, or -1
+     */
+    public record StoredValue(ChunkCacheKey key, double value, int band) {
 
         public StoredValue {
             if (!Double.isFinite(value) || value < 0.0) {
                 throw new IllegalArgumentException("a stored value must be finite and non-negative");
+            }
+            if (band < ConcentrationEntry.UNCLASSIFIED) {
+                throw new IllegalArgumentException("a band code cannot be below -1, was " + band);
             }
         }
     }
@@ -96,9 +109,8 @@ public final class ClientConcentrationStore {
     private final Set<RegionKey> dirtyRegions = new LinkedHashSet<>();
 
     private long tick;
-    private double baseline = Double.NaN;
-    private double fallbackBaseline = Double.NaN;
     private int serverRefreshIntervalTicks = DEFAULT_SERVER_REFRESH_INTERVAL_TICKS;
+    private OverlayPalette serverPalette = OverlayPalette.defaults();
 
     public ClientConcentrationStore(int maxEntries) {
         this.cache = new ConcentrationCache(maxEntries);
@@ -114,42 +126,21 @@ public final class ClientConcentrationStore {
     }
 
     /**
-     * Sets the server-supplied authoritative baseline.
+     * Sets the palette the datapack supplies, used for any band the client's
+     * config does not override.
      *
-     * @param baseline a finite positive value, or NaN when unknown
+     * @param palette the server's default palette, never null
      */
-    public void setBaseline(double baseline) {
-        if (!Double.isNaN(baseline) && (!Double.isFinite(baseline) || baseline <= 0.0)) {
-            throw new IllegalArgumentException("baseline must be positive or NaN, was " + baseline);
+    public void setServerPalette(OverlayPalette palette) {
+        if (palette == null) {
+            throw new IllegalArgumentException("the server palette cannot be null");
         }
-        this.baseline = baseline;
+        this.serverPalette = palette;
     }
 
-    /** The server-supplied baseline, or NaN when unknown. */
-    public double baseline() {
-        return this.baseline;
-    }
-
-    /**
-     * Sets the baseline to classify against while the server has not supplied
-     * one, so a server that cannot report its configured value does not silently
-     * remove every band (and with them the whole overlay).
-     *
-     * @param fallback a finite positive value, or NaN to disable the fallback
-     */
-    public void setFallbackBaseline(double fallback) {
-        if (!Double.isNaN(fallback) && (!Double.isFinite(fallback) || fallback <= 0.0)) {
-            throw new IllegalArgumentException("fallback baseline must be positive or NaN, was " + fallback);
-        }
-        this.fallbackBaseline = fallback;
-    }
-
-    /** The baseline actually used for classification: the server's, else the fallback. */
-    public double effectiveBaseline() {
-        if (Double.isFinite(this.baseline) && this.baseline > 0.0) {
-            return this.baseline;
-        }
-        return this.fallbackBaseline;
+    /** The palette the server last supplied; the built-in one until it does. */
+    public OverlayPalette serverPalette() {
+        return this.serverPalette;
     }
 
     /**
@@ -187,13 +178,13 @@ public final class ClientConcentrationStore {
      * @param mapped whether every enabled map considers the chunk mapped
      * @return true when the stored value changed (and the map needs a repaint)
      */
-    public boolean offer(ChunkCacheKey key, boolean mapped, double value) {
+    public boolean offer(ChunkCacheKey key, boolean mapped, double value, int band) {
         if (!mapped) {
             // Mapped-only rule: an unmapped chunk is never cached, even when the
             // server offered it. Structurally invisible to every consumer.
             return false;
         }
-        boolean changed = this.cache.put(key, value, this.tick);
+        boolean changed = this.cache.put(key, value, band, this.tick);
         if (changed) {
             bumpRegion(key);
         }
@@ -249,19 +240,16 @@ public final class ClientConcentrationStore {
      * The observation to display for a chunk: live when the server refreshed it
      * recently, otherwise the last known value. Empty when nothing is held.
      */
-    public Optional<Observation> observe(ChunkCacheKey key, long staleAfterTicks,
-            ConcentrationThresholds thresholds) {
+    public Optional<Observation> observe(ChunkCacheKey key, long staleAfterTicks) {
         Optional<ConcentrationEntry> entry = this.cache.entry(key);
         if (entry.isEmpty() || !entry.get().available()) {
             return Optional.empty();
         }
         ConcentrationEntry value = entry.get();
         boolean live = value.fresh(this.tick, staleAfterTicks);
-        Optional<ConcentrationClassification> classification = Optional.empty();
-        double baseline = effectiveBaseline();
-        if (Double.isFinite(baseline) && baseline > 0.0) {
-            classification = thresholds.classifyIfValid(value.value(), baseline);
-        }
+        // The band is the server's, never recomputed here: it owns the tier table.
+        Optional<ConcentrationClassification> classification =
+                ConcentrationClassification.fromCode(value.band());
         return Optional.of(new Observation(value.value(), classification, live));
     }
 
@@ -270,28 +258,27 @@ public final class ClientConcentrationStore {
         List<StoredValue> values = new ArrayList<>();
         for (ConcentrationCache.Snapshot snapshot : this.cache.snapshot()) {
             if (snapshot.entry().available()) {
-                values.add(new StoredValue(snapshot.key(), snapshot.entry().value()));
+                values.add(new StoredValue(snapshot.key(), snapshot.entry().value(), snapshot.entry().band()));
             }
         }
         return values;
     }
 
     /**
-     * Replays remembered values and their baseline.
+     * Replays remembered values, band included.
      *
      * <p>Restored values are always last-known, and a value the server has
      * already sent this session always wins. Rows come from a file this mod
-     * wrote through the mapped-only ingress, so they are already mapped chunks.</p>
+     * wrote through the mapped-only ingress, so they are already mapped chunks.
+     * A row written before bands were recorded carries {@code -1} and is shown
+     * uncoloured rather than reclassified against today's tiers.</p>
      *
      * @return true when anything changed and the maps need a repaint
      */
-    public boolean restoreHistory(List<StoredValue> values, double baseline) {
-        if (Double.isFinite(baseline) && baseline > 0.0 && Double.isNaN(this.baseline)) {
-            setBaseline(baseline);
-        }
+    public boolean restoreHistory(List<StoredValue> values) {
         boolean changed = false;
         for (StoredValue value : values) {
-            if (this.cache.putLastKnown(value.key(), value.value())) {
+            if (this.cache.putLastKnown(value.key(), value.value(), value.band())) {
                 bumpRegion(value.key());
                 changed = true;
             }
@@ -363,19 +350,20 @@ public final class ClientConcentrationStore {
         this.dirtyRegions.addAll(this.regionVersions.keySet());
         this.regionVersions.clear();
         this.cache.clear();
-        // The baseline belongs to the world, not to the dimension, so it survives
-        // a dimension change; clearBaseline() is for world changes and disconnects.
+        // The server-supplied palette and cadence belong to the world, not to the
+        // dimension, so they survive a dimension change; clearServerInfo() is for
+        // world changes and disconnects.
     }
 
     /**
-     * Forgets the server-supplied baseline, e.g. on disconnect or world change.
+     * Forgets what this server told us, e.g. on disconnect or world change.
      *
-     * <p>The confirmation cadence is reset with it: it is that server's policy,
-     * and a different world must not inherit it. The next join announces it again.</p>
+     * <p>The confirmation cadence and the datapack palette are that server's, and
+     * a different world must not inherit them. The next join announces both again.</p>
      */
-    public void clearBaseline() {
-        this.baseline = Double.NaN;
+    public void clearServerInfo() {
         this.serverRefreshIntervalTicks = DEFAULT_SERVER_REFRESH_INTERVAL_TICKS;
+        this.serverPalette = OverlayPalette.defaults();
     }
 
     public int size() {

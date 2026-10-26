@@ -4,7 +4,41 @@ All notable changes to this project. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses
 semantic versioning with pre-release suffixes.
 
-## [0.1.0-alpha.5] — 2026-10-26
+## [0.1.0-alpha.6] — 2026-10-26
+
+Per-dimension tiers from a datapack, decided by the server.
+
+### Added
+
+- **A dimension has its own normal.** Tensura's data puts the overworld at the bare
+  baseline, the nether at `1.2x` plus up to `+4500` per biome, the end at `1.5x`
+  plus `+4500`, and `tensura:hell` at `+100000`. One global baseline therefore
+  painted the nether and the end as a single flat "exceptional" colour and made the
+  ladder meaningless there. Bands are now computed against the dimension's own
+  baseline, and `tensura:hell` and `tensura:labyrinth` carry their own ladders
+  because their ranges are tight.
+- **Datapack-driven, server-authoritative tiers.** `data/<namespace>/magicule_tiers/*.json`
+  declares each dimension's baseline and optional band multipliers; a file may
+  instead carry the default `palette`. Packs merge, `/reload` re-reads, a broken
+  file is logged and skipped, and a dimension no pack describes still falls back to
+  Tensura's baseline. Shipped: overworld, nether, end, hell, labyrinth, boss area.
+- The server now classifies each chunk and sends the band with the value, so two
+  players on one server cannot disagree about a chunk's tier and no client config
+  can change it. The tier datapack is read on the server only.
+
+### Changed
+
+- **The client's `[thresholds]` and `[baseline]` sections are gone.** Bands are the
+  server's; multiplying a client-side baseline is exactly the second opinion this
+  removes. Leftover keys in an existing config file are ignored.
+- **`[palette]` colours now default to empty and opacities to `-1`,** both meaning
+  "use the datapack's value". Set a colour to override that band locally.
+- The history file is now version 2 and stores the band per row, so a replayed map
+  is painted the way it was observed rather than against today's tiers. Version 1
+  files are rejected as "no history" instead of being misread. There is no
+  migration: the map refills from the server as you play.
+- `ConcentrationPayload` carries a band per chunk and `ServerInfoPayload` carries
+  the palette; protocol version is now 3.
 
 One freshness rule instead of two: the client's "still current" window now comes
 from the server's own refresh cadence.

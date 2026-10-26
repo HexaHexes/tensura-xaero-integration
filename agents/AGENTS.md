@@ -18,9 +18,9 @@ third-party API — it records what those jars actually expose and what they do 
   `Xaero*Access` are the only classes importing those APIs. Do not import a
   third-party type anywhere else.
 
-**Test:** `./gradlew runGameTestServer` — `ConcentrationGameTests` (5 tests).
-`expectedTests = 5` in `build.gradle` must match the `@GameTest` count. JUnit:
-`./gradlew test` (74 tests, no Minecraft needed).
+**Test:** `./gradlew runGameTestServer` — `ConcentrationGameTests` (6 tests).
+`expectedTests = 6` in `build.gradle` must match the `@GameTest` count. JUnit:
+`./gradlew test` (128 tests, no Minecraft needed).
 
 **Gotchas**
 - **Two mixins are load-bearing.** `mixin/worldmap/WorldMapHighlighterRegistryMixin`

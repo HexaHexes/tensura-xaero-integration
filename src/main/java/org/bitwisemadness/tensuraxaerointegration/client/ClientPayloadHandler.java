@@ -1,6 +1,7 @@
 package org.bitwisemadness.tensuraxaerointegration.client;
 
 import org.bitwisemadness.tensuraxaerointegration.TensuraXaeroIntegration;
+import org.bitwisemadness.tensuraxaerointegration.concentration.OverlayPalette;
 import org.bitwisemadness.tensuraxaerointegration.net.ConcentrationPayload;
 
 /**
@@ -20,23 +21,28 @@ public final class ClientPayloadHandler {
         ClientConcentration.get().accept(payload);
     }
 
-    public static void onServerInfo(double baseline, int refreshIntervalTicks) {
+    /**
+     * Stores the server's presentation parameters: the confirmation cadence the
+     * freshness window derives from, and the datapack palette client config can
+     * override band by band.
+     */
+    public static void onServerInfo(double baseline, int refreshIntervalTicks, OverlayPalette palette) {
         ClientConcentrationStore store = ClientConcentration.get().store();
-        // Applied before the baseline so the freshness window is already the
-        // server's when anything classifies against it.
+        // Applied before anything is classified so the window is already the
+        // server's when a value arrives.
         if (refreshIntervalTicks > 0) {
             store.setServerRefreshInterval(refreshIntervalTicks);
         }
-        store.setBaseline(baseline);
+        store.setServerPalette(palette);
         // Logged once per session on purpose: a baseline the server could not
-        // read silently removes every band, and with them the whole overlay, so
-        // it has to be visible in a bug report rather than inferred.
+        // read and a cadence mismatch are both invisible in game, and both are
+        // answerable from a log rather than from guesswork.
         if (baselineLogged != (Double.isNaN(baseline) ? "nan" : "value")) {
             baselineLogged = Double.isNaN(baseline) ? "nan" : "value";
             if (Double.isNaN(baseline)) {
                 TensuraXaeroIntegration.LOGGER.warn(
-                        "Server could not report Tensura's baseline; classifying against the configured fallback ({})",
-                        store.effectiveBaseline());
+                        "Server could not report Tensura's baseline; chunks in dimensions without a "
+                                + "datapack tier entry will be shown without a band");
             } else {
                 TensuraXaeroIntegration.LOGGER.info(
                         "Tensura baseline for this world: {} (server confirms chunks every {} ticks, "

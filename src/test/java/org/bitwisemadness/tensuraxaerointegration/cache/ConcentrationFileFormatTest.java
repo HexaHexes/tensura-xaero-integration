@@ -14,9 +14,10 @@ import org.junit.jupiter.api.Test;
 class ConcentrationFileFormatTest {
 
     private static ConcentrationFileFormat.Contents contents() {
-        return new ConcentrationFileFormat.Contents(500.0, List.of(
-                new ConcentrationFileFormat.Row("minecraft:overworld", 34, -3, 600.0),
-                new ConcentrationFileFormat.Row("minecraft:the_nether", -7, 900, 12_500.5)));
+        return new ConcentrationFileFormat.Contents(List.of(
+                new ConcentrationFileFormat.Row("minecraft:overworld", 34, -3, 600.0, 1),
+                new ConcentrationFileFormat.Row("minecraft:the_nether", -7, 900, 12_500.5, 4),
+                new ConcentrationFileFormat.Row("minecraft:the_end", 1, 1, 800.0, -1)));
     }
 
     private static byte[] body(ConcentrationFileFormat.Contents contents) throws IOException {
@@ -36,12 +37,9 @@ class ConcentrationFileFormatTest {
     }
 
     @Test
-    void an_empty_file_round_trips_including_an_unknown_baseline() throws IOException {
-        ConcentrationFileFormat.Contents empty =
-                new ConcentrationFileFormat.Contents(Double.NaN, List.of());
-        ConcentrationFileFormat.Contents read = read(body(empty), 100);
-        assertEquals(0, read.rows().size());
-        assertTrue(Double.isNaN(read.baseline()));
+    void an_empty_file_round_trips() throws IOException {
+        ConcentrationFileFormat.Contents empty = new ConcentrationFileFormat.Contents(List.of());
+        assertEquals(0, read(body(empty), 100).rows().size());
     }
 
     @Test
@@ -58,8 +56,20 @@ class ConcentrationFileFormatTest {
         DataOutputStream out = new DataOutputStream(buffer);
         out.writeInt(ConcentrationFileFormat.MAGIC);
         out.writeByte(ConcentrationFileFormat.VERSION + 1);
-        out.writeDouble(500.0);
         out.writeInt(0);
+        out.flush();
+        assertThrows(IOException.class, () -> read(buffer.toByteArray(), 100));
+    }
+
+    @Test
+    void a_version_1_file_is_rejected_instead_of_read_as_version_2() throws IOException {
+        // Version 1 wrote a baseline double where version 2 writes the row count.
+        ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+        DataOutputStream out = new DataOutputStream(buffer);
+        out.writeInt(ConcentrationFileFormat.MAGIC);
+        out.writeByte(1);
+        out.writeDouble(500.0);
+        out.writeInt(1);
         out.flush();
         assertThrows(IOException.class, () -> read(buffer.toByteArray(), 100));
     }
@@ -76,7 +86,6 @@ class ConcentrationFileFormatTest {
         DataOutputStream out = new DataOutputStream(buffer);
         out.writeInt(ConcentrationFileFormat.MAGIC);
         out.writeByte(ConcentrationFileFormat.VERSION);
-        out.writeDouble(500.0);
         out.writeInt(-1);
         out.flush();
         assertThrows(IOException.class, () -> read(buffer.toByteArray(), 100));
@@ -88,12 +97,28 @@ class ConcentrationFileFormatTest {
         DataOutputStream out = new DataOutputStream(buffer);
         out.writeInt(ConcentrationFileFormat.MAGIC);
         out.writeByte(ConcentrationFileFormat.VERSION);
-        out.writeDouble(500.0);
         out.writeInt(1);
         out.writeUTF("minecraft:overworld");
         out.writeInt(0);
         out.writeInt(0);
         out.writeDouble(Double.NaN);
+        out.writeByte(1);
+        out.flush();
+        assertThrows(IOException.class, () -> read(buffer.toByteArray(), 100));
+    }
+
+    @Test
+    void an_impossible_band_code_in_the_file_is_rejected() throws IOException {
+        ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+        DataOutputStream out = new DataOutputStream(buffer);
+        out.writeInt(ConcentrationFileFormat.MAGIC);
+        out.writeByte(ConcentrationFileFormat.VERSION);
+        out.writeInt(1);
+        out.writeUTF("minecraft:overworld");
+        out.writeInt(0);
+        out.writeInt(0);
+        out.writeDouble(600.0);
+        out.writeByte(-2);
         out.flush();
         assertThrows(IOException.class, () -> read(buffer.toByteArray(), 100));
     }
@@ -109,18 +134,27 @@ class ConcentrationFileFormatTest {
     @Test
     void rows_reject_values_that_are_not_observations() {
         assertThrows(IllegalArgumentException.class,
-                () -> new ConcentrationFileFormat.Row("minecraft:overworld", 0, 0, Double.NaN));
+                () -> new ConcentrationFileFormat.Row("minecraft:overworld", 0, 0, Double.NaN, 1));
         assertThrows(IllegalArgumentException.class,
-                () -> new ConcentrationFileFormat.Row("minecraft:overworld", 0, 0, -1.0));
+                () -> new ConcentrationFileFormat.Row("minecraft:overworld", 0, 0, -1.0, 1));
         assertThrows(IllegalArgumentException.class,
-                () -> new ConcentrationFileFormat.Row(" ", 0, 0, 1.0));
+                () -> new ConcentrationFileFormat.Row(" ", 0, 0, 1.0, 1));
+        assertThrows(IllegalArgumentException.class,
+                () -> new ConcentrationFileFormat.Row("minecraft:overworld", 0, 0, 1.0, -2));
     }
 
     @Test
-    void contents_reject_an_impossible_baseline() {
-        assertThrows(IllegalArgumentException.class,
-                () -> new ConcentrationFileFormat.Contents(0.0, List.of()));
-        assertThrows(IllegalArgumentException.class,
-                () -> new ConcentrationFileFormat.Contents(-5.0, List.of()));
+    void an_unclassified_band_survives_the_round_trip() throws IOException {
+        ConcentrationFileFormat.Row row =
+                new ConcentrationFileFormat.Row("minecraft:overworld", 0, 0, 600.0, -1);
+        ConcentrationFileFormat.Contents read =
+                read(body(new ConcentrationFileFormat.Contents(List.of(row))), 10);
+        assertEquals(-1, read.rows().getFirst().band());
+    }
+
+    @Test
+    void an_empty_file_is_still_written_with_a_version() throws IOException {
+        byte[] bytes = body(new ConcentrationFileFormat.Contents(List.of()));
+        assertTrue(bytes.length >= 6, "magic + version + count are always written");
     }
 }

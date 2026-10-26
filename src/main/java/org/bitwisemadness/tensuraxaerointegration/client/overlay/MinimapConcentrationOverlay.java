@@ -53,7 +53,8 @@ public final class MinimapConcentrationOverlay extends ChunkHighlighter {
         }
         Observation value = observation.get();
         double scale = value.live() ? 1.0 : ClientConfig.historicalOpacityScale();
-        int colour = ClientConfig.palette().xaeroColorFor(value.classification().orElse(null), scale);
+        int colour = ClientConfig.palette(ClientConcentration.get().store().serverPalette())
+                .xaeroColorFor(value.classification().orElse(null), scale);
         return new int[] {colour, colour, colour, colour, colour};
     }
 
@@ -76,7 +77,6 @@ public final class MinimapConcentrationOverlay extends ChunkHighlighter {
         ClientConcentrationStore store = ClientConcentration.get().store();
         return store.observe(
                 ClientConcentration.get().key(dimension, chunkX, chunkZ),
-                store.staleAfterTicks(),
-                ClientConfig.thresholds());
+                store.staleAfterTicks());
     }
 }

@@ -52,8 +52,8 @@ public final class ConcentrationCache {
      *
      * @return true when the stored value or its availability actually changed
      */
-    public synchronized boolean put(ChunkCacheKey key, double value, long tick) {
-        return write(key, ConcentrationEntry.of(value, tick));
+    public synchronized boolean put(ChunkCacheKey key, double value, int band, long tick) {
+        return write(key, ConcentrationEntry.of(value, band, tick));
     }
 
     /**
@@ -77,7 +77,7 @@ public final class ConcentrationCache {
         if (current == null || !current.available() || current.historical()) {
             return false;
         }
-        return write(key, ConcentrationEntry.lastKnown(current.value()));
+        return write(key, ConcentrationEntry.lastKnown(current.value(), current.band()));
     }
 
     /**
@@ -86,12 +86,12 @@ public final class ConcentrationCache {
      * <p>A value the server has already sent this session always wins, so a
      * replayed file can never overwrite fresher information.</p>
      */
-    public synchronized boolean putLastKnown(ChunkCacheKey key, double value) {
+    public synchronized boolean putLastKnown(ChunkCacheKey key, double value, int band) {
         ConcentrationEntry current = this.entries.get(key);
         if (current != null && !current.historical()) {
             return false;
         }
-        return write(key, ConcentrationEntry.lastKnown(value));
+        return write(key, ConcentrationEntry.lastKnown(value, band));
     }
 
     private boolean write(ChunkCacheKey key, ConcentrationEntry next) {
@@ -105,6 +105,7 @@ public final class ConcentrationCache {
         // changes how it is drawn, so it has to count as a change.
         return a.available() == b.available()
                 && a.historical() == b.historical()
+                && a.band() == b.band()
                 && Double.compare(a.value(), b.value()) == 0;
     }
 

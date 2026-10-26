@@ -10,6 +10,8 @@ import org.junit.jupiter.api.Test;
 
 class CacheKeyAndCacheTest {
 
+    private static final int BAND = 1;
+
     private static final ChunkCacheKey OVERWORLD_SAVE_A =
             new ChunkCacheKey("save-a", "minecraft:overworld", 3, -7);
 
@@ -25,8 +27,8 @@ class CacheKeyAndCacheTest {
         ChunkCacheKey nether = new ChunkCacheKey("save-a", "minecraft:the_nether", 3, -7);
         assertNotEquals(OVERWORLD_SAVE_A, nether);
         ConcentrationCache cache = new ConcentrationCache(8);
-        cache.put(OVERWORLD_SAVE_A, 900.0, 1);
-        cache.put(nether, 1200.0, 1);
+        cache.put(OVERWORLD_SAVE_A, 900.0, BAND, 1);
+        cache.put(nether, 1200.0, BAND, 1);
         assertEquals(900.0, cache.value(OVERWORLD_SAVE_A).getAsDouble());
         assertEquals(1200.0, cache.value(nether).getAsDouble());
     }
@@ -36,8 +38,8 @@ class CacheKeyAndCacheTest {
         ChunkCacheKey otherSave = OVERWORLD_SAVE_A.withWorld("save-b");
         assertNotEquals(OVERWORLD_SAVE_A, otherSave);
         ConcentrationCache cache = new ConcentrationCache(8);
-        cache.put(OVERWORLD_SAVE_A, 600.0, 1);
-        cache.put(otherSave, 700.0, 1);
+        cache.put(OVERWORLD_SAVE_A, 600.0, BAND, 1);
+        cache.put(otherSave, 700.0, BAND, 1);
         assertEquals(600.0, cache.value(OVERWORLD_SAVE_A).getAsDouble());
         assertEquals(700.0, cache.value(otherSave).getAsDouble());
     }
@@ -67,19 +69,19 @@ class CacheKeyAndCacheTest {
     @Test
     void a_changed_value_is_reported_and_an_unchanged_one_is_not() {
         ConcentrationCache cache = new ConcentrationCache(8);
-        assertTrue(cache.put(OVERWORLD_SAVE_A, 600.0, 1));
-        assertFalse(cache.put(OVERWORLD_SAVE_A, 600.0, 2), "same value must not count as a change");
-        assertTrue(cache.put(OVERWORLD_SAVE_A, 601.0, 3));
-        assertFalse(cache.put(OVERWORLD_SAVE_A, 601.0, 4));
+        assertTrue(cache.put(OVERWORLD_SAVE_A, 600.0, BAND, 1));
+        assertFalse(cache.put(OVERWORLD_SAVE_A, 600.0, BAND, 2), "same value must not count as a change");
+        assertTrue(cache.put(OVERWORLD_SAVE_A, 601.0, BAND, 3));
+        assertFalse(cache.put(OVERWORLD_SAVE_A, 601.0, BAND, 4));
     }
 
     @Test
     void an_unchanged_refresh_still_updates_freshness() {
         ConcentrationCache cache = new ConcentrationCache(8);
-        cache.put(OVERWORLD_SAVE_A, 600.0, 10);
+        cache.put(OVERWORLD_SAVE_A, 600.0, BAND, 10);
         assertTrue(cache.freshValue(OVERWORLD_SAVE_A, 20, 15).isPresent());
         // Re-observed unchanged at tick 30: value stays, freshness moves.
-        assertFalse(cache.put(OVERWORLD_SAVE_A, 600.0, 30));
+        assertFalse(cache.put(OVERWORLD_SAVE_A, 600.0, BAND, 30));
         assertTrue(cache.freshValue(OVERWORLD_SAVE_A, 40, 15).isPresent());
         assertEquals(600.0, cache.value(OVERWORLD_SAVE_A).getAsDouble());
     }
@@ -87,7 +89,7 @@ class CacheKeyAndCacheTest {
     @Test
     void stale_values_are_not_offered_as_fresh() {
         ConcentrationCache cache = new ConcentrationCache(8);
-        cache.put(OVERWORLD_SAVE_A, 600.0, 10);
+        cache.put(OVERWORLD_SAVE_A, 600.0, BAND, 10);
         assertTrue(cache.freshValue(OVERWORLD_SAVE_A, 30, 15).isEmpty());
         assertTrue(cache.value(OVERWORLD_SAVE_A).isPresent(), "the value itself is still cached");
     }
@@ -95,7 +97,7 @@ class CacheKeyAndCacheTest {
     @Test
     void going_unavailable_is_a_change_and_clears_the_value() {
         ConcentrationCache cache = new ConcentrationCache(8);
-        cache.put(OVERWORLD_SAVE_A, 600.0, 1);
+        cache.put(OVERWORLD_SAVE_A, 600.0, BAND, 1);
         assertTrue(cache.markUnavailable(OVERWORLD_SAVE_A, 2));
         assertTrue(cache.value(OVERWORLD_SAVE_A).isEmpty());
         assertFalse(cache.markUnavailable(OVERWORLD_SAVE_A, 3), "already unavailable");
@@ -105,7 +107,7 @@ class CacheKeyAndCacheTest {
     @Test
     void a_valid_zero_is_distinct_from_missing_data() {
         ConcentrationCache cache = new ConcentrationCache(8);
-        cache.put(OVERWORLD_SAVE_A, 0.0, 1);
+        cache.put(OVERWORLD_SAVE_A, 0.0, BAND, 1);
         assertTrue(cache.value(OVERWORLD_SAVE_A).isPresent());
         assertEquals(0.0, cache.value(OVERWORLD_SAVE_A).getAsDouble());
     }
@@ -116,10 +118,10 @@ class CacheKeyAndCacheTest {
         ChunkCacheKey a = new ChunkCacheKey("s", "d", 1, 1);
         ChunkCacheKey b = new ChunkCacheKey("s", "d", 2, 2);
         ChunkCacheKey c = new ChunkCacheKey("s", "d", 3, 3);
-        cache.put(a, 1.0, 1);
-        cache.put(b, 2.0, 1);
+        cache.put(a, 1.0, BAND, 1);
+        cache.put(b, 2.0, BAND, 1);
         cache.value(a); // touch a, so b is the eviction candidate
-        cache.put(c, 3.0, 1);
+        cache.put(c, 3.0, BAND, 1);
         assertEquals(2, cache.size());
         assertTrue(cache.value(a).isPresent());
         assertTrue(cache.value(b).isEmpty());
@@ -129,7 +131,7 @@ class CacheKeyAndCacheTest {
     @Test
     void clearing_removes_everything() {
         ConcentrationCache cache = new ConcentrationCache(8);
-        cache.put(OVERWORLD_SAVE_A, 600.0, 1);
+        cache.put(OVERWORLD_SAVE_A, 600.0, BAND, 1);
         cache.clear();
         assertEquals(0, cache.size());
         assertTrue(cache.value(OVERWORLD_SAVE_A).isEmpty());
@@ -143,16 +145,16 @@ class CacheKeyAndCacheTest {
     @Test
     void entries_reject_inconsistent_availability() {
         assertThrows(IllegalArgumentException.class,
-                () -> new ConcentrationEntry(Double.NaN, 1, true, false));
+                () -> new ConcentrationEntry(Double.NaN, BAND, 1, true, false));
         assertThrows(IllegalArgumentException.class,
-                () -> new ConcentrationEntry(5.0, 1, false, false));
+                () -> new ConcentrationEntry(5.0, BAND, 1, false, false));
         assertThrows(IllegalArgumentException.class,
-                () -> new ConcentrationEntry(Double.NaN, 1, false, true));
+                () -> new ConcentrationEntry(Double.NaN, BAND, 1, false, true));
     }
 
     @Test
     void a_last_known_entry_is_never_fresh() {
-        ConcentrationEntry entry = ConcentrationEntry.lastKnown(600.0);
+        ConcentrationEntry entry = ConcentrationEntry.lastKnown(600.0, BAND);
         assertEquals(600.0, entry.value());
         assertTrue(entry.historical());
         assertFalse(entry.fresh(0, 10_000), "a remembered value is not a current one");
@@ -161,7 +163,7 @@ class CacheKeyAndCacheTest {
     @Test
     void demoting_keeps_the_value_and_counts_as_a_change() {
         ConcentrationCache cache = new ConcentrationCache(8);
-        cache.put(OVERWORLD_SAVE_A, 600.0, 5);
+        cache.put(OVERWORLD_SAVE_A, 600.0, BAND, 5);
         assertTrue(cache.demote(OVERWORLD_SAVE_A));
         assertFalse(cache.demote(OVERWORLD_SAVE_A), "already last known");
         assertEquals(600.0, cache.value(OVERWORLD_SAVE_A).getAsDouble());
@@ -172,12 +174,12 @@ class CacheKeyAndCacheTest {
     @Test
     void a_replayed_value_never_overwrites_a_live_one() {
         ConcentrationCache cache = new ConcentrationCache(8);
-        cache.put(OVERWORLD_SAVE_A, 600.0, 5);
-        assertFalse(cache.putLastKnown(OVERWORLD_SAVE_A, 900.0));
+        cache.put(OVERWORLD_SAVE_A, 600.0, BAND, 5);
+        assertFalse(cache.putLastKnown(OVERWORLD_SAVE_A, 900.0, BAND));
         assertEquals(600.0, cache.value(OVERWORLD_SAVE_A).getAsDouble());
 
         ChunkCacheKey untouched = new ChunkCacheKey("sp:save-a", "minecraft:overworld", 41, 41);
-        assertTrue(cache.putLastKnown(untouched, 900.0));
+        assertTrue(cache.putLastKnown(untouched, 900.0, BAND));
         assertTrue(cache.entry(untouched).orElseThrow().historical());
     }
 }

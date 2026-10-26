@@ -1,0 +1,20 @@
+{
+  "palette": {
+    "slightly_elevated": {
+      "color": "#29B6F6",
+      "opacity": 0.10
+    },
+    "moderately_elevated": {
+      "color": "#5C6BC0",
+      "opacity": 0.20
+    },
+    "highly_elevated": {
+      "color": "#AB47BC",
+      "opacity": 0.32
+    },
+    "exceptionally_elevated": {
+      "color": "#EC407A",
+      "opacity": 0.45
+    }
+  }
+}

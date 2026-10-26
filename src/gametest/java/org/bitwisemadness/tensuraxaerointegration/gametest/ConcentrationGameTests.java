@@ -11,7 +11,11 @@ import net.neoforged.neoforge.gametest.PrefixGameTestTemplate;
 import org.bitwisemadness.tensuraxaerointegration.TensuraXaeroIntegration;
 import org.bitwisemadness.tensuraxaerointegration.config.ServerConfig;
 import org.bitwisemadness.tensuraxaerointegration.server.ConcentrationServer;
+import org.bitwisemadness.tensuraxaerointegration.concentration.ConcentrationClassification;
 import org.bitwisemadness.tensuraxaerointegration.tensura.TensuraBridge;
+import org.bitwisemadness.tensuraxaerointegration.tiers.DimensionTier;
+import org.bitwisemadness.tensuraxaerointegration.tiers.MagiculeTiers;
+import org.bitwisemadness.tensuraxaerointegration.tiers.TierTable;
 
 /**
  * Server-side checks against the real Tensura jar.
@@ -103,6 +107,39 @@ public final class ConcentrationGameTests {
         ConcentrationServer.get().onServerTick(helper.getLevel().getServer());
         if (ConcentrationServer.get().hasSubscriptions()) {
             helper.fail("No subscriptions should exist without players");
+            return;
+        }
+        helper.succeed();
+    }
+
+    /**
+     * The datapack reaches the server: it loads, describes the shipped dimensions,
+     * and gives the hell dimension its own ladder instead of the default one.
+     */
+    @GameTest(template = "empty")
+    public static void tier_datapack_is_loaded(GameTestHelper helper) {
+        TierTable table = MagiculeTiers.get();
+        if (table.describedDimensions().isEmpty()) {
+            helper.fail("no dimension tiers were loaded; the datapack did not reach the server");
+            return;
+        }
+        if (!table.describedDimensions().contains("minecraft:overworld")) {
+            helper.fail("the overworld entry is missing from the loaded table: "
+                    + table.describedDimensions());
+            return;
+        }
+        DimensionTier overworld = table.forDimension("minecraft:overworld", 1.0).orElseThrow();
+        if (overworld.baseline() != 500.0) {
+            helper.fail("the overworld baseline should be 500.0, was " + overworld.baseline());
+            return;
+        }
+        if (!overworld.classify(600.0).filter(band -> band != ConcentrationClassification.NORMAL).isPresent()) {
+            helper.fail("600 should be an elevated band in the overworld, got " + overworld.classify(600.0));
+            return;
+        }
+        DimensionTier hell = table.forDimension("tensura:hell", 1.0).orElseThrow();
+        if (!(hell.baseline() > 1000.0)) {
+            helper.fail("the hell entry should use its own high baseline, was " + hell.baseline());
             return;
         }
         helper.succeed();

@@ -83,7 +83,8 @@ public final class WorldMapConcentrationOverlay extends ChunkHighlighter {
         // A value that is no longer refreshed is drawn dimmer, never as bright as
         // a current one; a normal chunk stays fully transparent either way.
         double scale = value.live() ? 1.0 : ClientConfig.historicalOpacityScale();
-        int colour = ClientConfig.palette().xaeroColorFor(value.classification().orElse(null), scale);
+        int colour = ClientConfig.palette(ClientConcentration.get().store().serverPalette())
+                .xaeroColorFor(value.classification().orElse(null), scale);
         if (!loggedPainted && (colour & 0xFF) > 0) {
             loggedPainted = true;
             TensuraXaeroIntegration.LOGGER.info(
@@ -124,8 +125,7 @@ public final class WorldMapConcentrationOverlay extends ChunkHighlighter {
         ClientConcentrationStore store = ClientConcentration.get().store();
         return store.observe(
                 ClientConcentration.get().key(dimension, chunkX, chunkZ),
-                store.staleAfterTicks(),
-                ClientConfig.thresholds());
+                store.staleAfterTicks());
     }
 
     private static RegionKey regionKey(ResourceKey<Level> dimension, int regionX, int regionZ) {

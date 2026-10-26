@@ -153,6 +153,7 @@ public final class ClientConcentration {
         }
         long[] chunks = payload.chunks();
         double[] values = payload.values();
+        byte[] bands = payload.bands();
         ResourceKey<Level> dimensionKey = ResourceKey.create(Registries.DIMENSION, payload.dimension());
         String token = this.worldToken.isBlank() ? "unknown" : this.worldToken;
         for (int i = 0; i < chunks.length; i++) {
@@ -167,7 +168,8 @@ public final class ClientConcentration {
             if (Double.isNaN(value)) {
                 store().markUnavailable(key, mapped);
             } else {
-                store().offer(key, mapped, value);
+                // The band is the server's decision; the client stores it as-is.
+                store().offer(key, mapped, value, bands[i]);
             }
         }
     }
@@ -178,7 +180,7 @@ public final class ClientConcentration {
         saveToDisk(this.worldToken, true);
         this.subscriptions.clear();
         store().clear();
-        store().clearBaseline();
+        store().clearServerInfo();
         this.worldToken = "";
         this.dimensionId = "";
         this.lastSubscribeTick = 0;
@@ -191,9 +193,9 @@ public final class ClientConcentration {
     /**
      * Writes this world's remembered values.
      *
-     * <p>Also stored is the baseline those values were classified against, so a
-     * replayed map is coloured the way it was when the values were observed. The
-     * server overwrites it on login.</p>
+     * <p>Each row also carries the band the server gave it, so a replayed map is
+     * coloured the way it was when the values were observed rather than against
+     * whatever tiers the datapack holds today.</p>
      *
      * @param synchronous true when a load follows immediately, so the write must
      *                    be on disk before it runs
@@ -203,17 +205,16 @@ public final class ClientConcentration {
             return;
         }
         List<StoredValue> stored = store().storedValues();
-        double baseline = store().baseline();
-        if (stored.isEmpty() && Double.isNaN(baseline)) {
+        if (stored.isEmpty()) {
             return;
         }
         List<ConcentrationFileFormat.Row> rows = new ArrayList<>(stored.size());
         for (StoredValue value : stored) {
             ChunkCacheKey key = value.key();
             rows.add(new ConcentrationFileFormat.Row(
-                    key.dimension(), key.chunkX(), key.chunkZ(), value.value()));
+                    key.dimension(), key.chunkX(), key.chunkZ(), value.value(), value.band()));
         }
-        ConcentrationFileFormat.Contents contents = new ConcentrationFileFormat.Contents(baseline, rows);
+        ConcentrationFileFormat.Contents contents = new ConcentrationFileFormat.Contents(rows);
         if (synchronous) {
             this.storage.saveNow(token, contents);
         } else {
@@ -236,9 +237,10 @@ public final class ClientConcentration {
             List<StoredValue> values = new ArrayList<>(contents.rows().size());
             for (ConcentrationFileFormat.Row row : contents.rows()) {
                 values.add(new StoredValue(
-                        new ChunkCacheKey(token, row.dimension(), row.chunkX(), row.chunkZ()), row.value()));
+                        new ChunkCacheKey(token, row.dimension(), row.chunkX(), row.chunkZ()),
+                        row.value(), row.band()));
             }
-            store().restoreHistory(values, contents.baseline());
+            store().restoreHistory(values);
         });
     }
 
@@ -262,14 +264,11 @@ public final class ClientConcentration {
         this.subscriptions.clear();
         store().clear();
         if (newWorld) {
-            // The baseline is per world; a dimension change keeps it.
-            store().clearBaseline();
+            // The palette and cadence are per world; a dimension change keeps them.
+            store().clearServerInfo();
         }
-        // Until the server reports its own value, classify against the configured
-        // fallback instead of against nothing (which would hide every band).
-        store().setFallbackBaseline(ClientConfig.fallbackBaseline());
-        // Replay this world's remembered values. Live answers replace them within
-        // a tick or two for whatever the server currently has loaded.
+        // Replay this world's remembered values, bands included. Live answers
+        // replace them within a tick or two for whatever the server has loaded.
         loadFromDisk(token);
         this.worldToken = token;
         this.dimensionId = dimension;

@@ -6,6 +6,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.OptionalDouble;
 import java.util.Set;
 import java.util.UUID;
@@ -25,9 +26,12 @@ import org.bitwisemadness.tensuraxaerointegration.net.ConcentrationPayload;
 import org.bitwisemadness.tensuraxaerointegration.net.PackedChunkPos;
 import org.bitwisemadness.tensuraxaerointegration.net.ServerInfoPayload;
 import org.bitwisemadness.tensuraxaerointegration.net.SubscriptionPayload;
+import org.bitwisemadness.tensuraxaerointegration.concentration.ConcentrationClassification;
 import org.bitwisemadness.tensuraxaerointegration.refresh.ReconcileCursor;
 import org.bitwisemadness.tensuraxaerointegration.refresh.UpdateQueue;
 import org.bitwisemadness.tensuraxaerointegration.tensura.TensuraBridge;
+import org.bitwisemadness.tensuraxaerointegration.tiers.DimensionTier;
+import org.bitwisemadness.tensuraxaerointegration.tiers.MagiculeTiers;
 
 /**
  * Server-side owner of the concentration pipeline.
@@ -71,6 +75,9 @@ public final class ConcentrationServer {
     private String worldToken = "server";
     private int lastBaselineTick = Integer.MIN_VALUE;
 
+    /** Tensura's baseline as last read, NaN when unreadable; a tier fallback. */
+    private double baseline = Double.NaN;
+
     private ConcentrationServer() {
     }
 
@@ -85,6 +92,7 @@ public final class ConcentrationServer {
         this.worldToken = name == null || name.isBlank() ? "server" : name;
         this.players.clear();
         this.lastBaselineTick = Integer.MIN_VALUE;
+        this.baseline = Double.NaN;
     }
 
     /** Called on server stop: drops every subscription and pending update. */
@@ -193,12 +201,13 @@ public final class ConcentrationServer {
             return;
         }
         double value = readOrNaN(TensuraBridge.read(chunk));
+        int band = bandFor(dimension, value);
         int now = this.server == null ? 0 : this.server.getTickCount();
         for (PlayerState state : this.players.values()) {
             if (!dimension.equals(state.dimension) || !state.subscriptions.contains(key)) {
                 continue;
             }
-            state.queue.offerIfChanged(key, value, now);
+            state.queue.offerIfChanged(key, value, band, now);
         }
     }
 
@@ -225,6 +234,7 @@ public final class ConcentrationServer {
             this.lastBaselineTick = now;
         }
         double baseline = readOrNaN(TensuraBridge.baseline());
+        this.baseline = baseline;
         if (Double.isNaN(baseline)) {
             // Tensura's config can be unreadable for a moment; retry soon rather
             // than leaving clients without a baseline for the full interval.
@@ -244,8 +254,8 @@ public final class ConcentrationServer {
             if (state.baselinePending || sendServerInfo) {
                 // The heartbeat cadence travels with the baseline: the client derives
                 // its freshness window from it, so the two cannot drift apart.
-                PacketDistributor.sendToPlayer(player,
-                        new ServerInfoPayload(baseline, ServerConfig.refreshIntervalTicks()));
+                PacketDistributor.sendToPlayer(player, new ServerInfoPayload(baseline,
+                        ServerConfig.refreshIntervalTicks(), MagiculeTiers.get().palette()));
                 state.baselinePending = false;
             }
             pruneIneligible(player, state);
@@ -310,7 +320,8 @@ public final class ConcentrationServer {
             if (!state.subscriptions.contains(key)) {
                 continue;
             }
-            state.queue.offerRefresh(key, readOrNaN(TensuraBridge.read(level, key.chunkX(), key.chunkZ())));
+            double concentration = readOrNaN(TensuraBridge.read(level, key.chunkX(), key.chunkZ()));
+            state.queue.offerRefresh(key, concentration, bandFor(key.dimension(), concentration));
             refreshed++;
         }
     }
@@ -318,7 +329,27 @@ public final class ConcentrationServer {
     /** Reads a chunk's current value and queues it when it differs from what was sent. */
     private void offerCurrent(ServerLevel level, ChunkCacheKey key, int now, PlayerState state) {
         OptionalDouble value = TensuraBridge.read(level, key.chunkX(), key.chunkZ());
-        state.queue.offerIfChanged(key, readOrNaN(value), now);
+        double concentration = readOrNaN(value);
+        state.queue.offerIfChanged(key, concentration, bandFor(key.dimension(), concentration), now);
+    }
+
+    /**
+     * The band the client should paint for a value, decided here so every player
+     * sees the same tiers for the same chunk.
+     *
+     * <p>The dimension's datapack entry wins; an unlisted dimension falls back to
+     * Tensura's baseline with the default ladder. {@code -1} means "no band",
+     * which the client shows as an uncoloured value rather than guessing.</p>
+     */
+    private int bandFor(String dimension, double value) {
+        if (!Double.isFinite(value) || value < 0.0) {
+            return -1;
+        }
+        Optional<DimensionTier> tier = MagiculeTiers.get().forDimension(dimension, this.baseline);
+        if (tier.isEmpty()) {
+            return -1;
+        }
+        return tier.get().classify(value).map(ConcentrationClassification::code).orElse(-1);
     }
 
     /** Sends everything the queue allows right now, batched into one payload. */
@@ -333,13 +364,15 @@ public final class ConcentrationServer {
         }
         long[] chunks = new long[ready.size()];
         double[] values = new double[ready.size()];
+        byte[] bands = new byte[ready.size()];
         for (int i = 0; i < ready.size(); i++) {
             UpdateQueue.Update update = ready.get(i);
             chunks[i] = PackedChunkPos.pack(update.key().chunkX(), update.key().chunkZ());
             values[i] = update.value();
+            bands[i] = (byte) update.band();
         }
         ResourceLocation dimension = ResourceLocation.parse(state.dimension);
-        PacketDistributor.sendToPlayer(player, new ConcentrationPayload(dimension, chunks, values));
+        PacketDistributor.sendToPlayer(player, new ConcentrationPayload(dimension, chunks, values, bands));
     }
 
     /**

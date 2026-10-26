@@ -31,16 +31,23 @@ import org.bitwisemadness.tensuraxaerointegration.cache.ChunkCacheKey;
  */
 public final class UpdateQueue {
 
-    /** One ready-to-send update. */
-    public record Update(ChunkCacheKey key, double value) {
+    /**
+     * One ready-to-send update.
+     *
+     * @param band the server's band code for the value, or {@code -1} when it
+     *             could not be classified
+     */
+    public record Update(ChunkCacheKey key, double value, int band) {
     }
 
     private static final class Slot {
         private double pendingValue;
+        private int pendingBand = -1;
         private boolean pending;
         private boolean everSent;
         private long lastSentTick;
         private double lastSentValue;
+        private int lastSentBand = -1;
     }
 
     private final Map<ChunkCacheKey, Slot> slots = new LinkedHashMap<>();
@@ -51,14 +58,15 @@ public final class UpdateQueue {
      * @return true when this differs from the last value sent for the chunk (or
      *         nothing was sent yet), i.e. the value is worth sending
      */
-    public boolean offerIfChanged(ChunkCacheKey key, double value, long tick) {
+    public boolean offerIfChanged(ChunkCacheKey key, double value, int band, long tick) {
         Slot slot = this.slots.computeIfAbsent(key, ignored -> new Slot());
-        if (slot.everSent && sameDouble(slot.lastSentValue, value)) {
+        if (slot.everSent && sameDouble(slot.lastSentValue, value) && slot.lastSentBand == band) {
             // Nothing to send. A still-pending, now-redundant offer is dropped.
             slot.pending = false;
             return false;
         }
         slot.pendingValue = value;
+        slot.pendingBand = band;
         slot.pending = true;
         return true;
     }
@@ -71,9 +79,10 @@ public final class UpdateQueue {
      * being refreshed. This is the heartbeat that keeps a genuine observation
      * counting as live; the throttle in {@link #takeReady} still applies.</p>
      */
-    public void offerRefresh(ChunkCacheKey key, double value) {
+    public void offerRefresh(ChunkCacheKey key, double value, int band) {
         Slot slot = this.slots.computeIfAbsent(key, ignored -> new Slot());
         slot.pendingValue = value;
+        slot.pendingBand = band;
         slot.pending = true;
     }
 
@@ -143,7 +152,8 @@ public final class UpdateQueue {
             slot.everSent = true;
             slot.lastSentTick = now;
             slot.lastSentValue = slot.pendingValue;
-            ready.add(new Update(entry.getKey(), slot.pendingValue));
+            slot.lastSentBand = slot.pendingBand;
+            ready.add(new Update(entry.getKey(), slot.pendingValue, slot.pendingBand));
         }
         return ready;
     }

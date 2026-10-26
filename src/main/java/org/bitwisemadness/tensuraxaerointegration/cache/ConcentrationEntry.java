@@ -15,12 +15,21 @@ package org.bitwisemadness.tensuraxaerointegration.cache;
  * shown, but it must be shown as <em>last known</em> rather than as a current
  * value. Only a fresh observation clears the flag.</p>
  *
+ * <p>{@code band} is the server's closed-vocabulary band code for the value (see
+ * {@code ConcentrationClassification#code()}), or {@code -1} when the server
+ * could not classify it. It is stored, not recomputed: the tiers are the
+ * server's, so a client-side second opinion is exactly what must not exist.</p>
+ *
  * @param value      the observed concentration, or NaN when unavailable
+ * @param band       the server's band code, or -1 when unclassified
  * @param tick       the tick the observation was taken at (ignored when historical)
  * @param available  whether {@code value} is real
  * @param historical whether the value is a remembered observation, not a current one
  */
-public record ConcentrationEntry(double value, long tick, boolean available, boolean historical) {
+public record ConcentrationEntry(double value, int band, long tick, boolean available, boolean historical) {
+
+    /** No band: the value could not be classified, so nothing is painted for it. */
+    public static final int UNCLASSIFIED = -1;
 
     public ConcentrationEntry {
         if (available && !Double.isFinite(value)) {
@@ -32,19 +41,22 @@ public record ConcentrationEntry(double value, long tick, boolean available, boo
         if (!available && historical) {
             throw new IllegalArgumentException("an unavailable entry cannot be historical");
         }
+        if (band < UNCLASSIFIED) {
+            throw new IllegalArgumentException("a band code cannot be below -1, was " + band);
+        }
     }
 
-    static ConcentrationEntry of(double value, long tick) {
-        return new ConcentrationEntry(value, tick, true, false);
+    static ConcentrationEntry of(double value, int band, long tick) {
+        return new ConcentrationEntry(value, band, tick, true, false);
     }
 
     static ConcentrationEntry unavailable(long tick) {
-        return new ConcentrationEntry(Double.NaN, tick, false, false);
+        return new ConcentrationEntry(Double.NaN, UNCLASSIFIED, tick, false, false);
     }
 
     /** A remembered observation: shown dimmer and labelled last-known. */
-    static ConcentrationEntry lastKnown(double value) {
-        return new ConcentrationEntry(value, 0L, true, true);
+    static ConcentrationEntry lastKnown(double value, int band) {
+        return new ConcentrationEntry(value, band, 0L, true, true);
     }
 
     /** Whether the observation is current: available, not historical, within the window. */

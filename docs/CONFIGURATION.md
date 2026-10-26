@@ -13,8 +13,9 @@ The client file holds what is drawn and how it looks, plus how much data this
 client asks for. The server file holds what may be sent and how much work the
 server may spend, so a pack can tune a world without touching any client.
 
-Badly ordered thresholds fall back to the defaults with a single warning;
-unparsable colours fall back to that band's default colour. Neither ever throws.
+Badly written datapack files are reported in the log and skipped, so one typo can
+never empty the tier table; unparsable colours in the client config fall back to
+the server's colour. Neither ever throws.
 
 ---
 
@@ -31,57 +32,32 @@ unparsable colours fall back to that band's default colour. Neither ever throws.
 Each overlay also needs its map mod installed; the switch alone cannot create
 one.
 
-### `[thresholds]`
-
-Band boundaries as **multiples of Tensura's configured baseline**
-(`area_magicule_config: baseMagicule`), not absolute magicule amounts. Multipliers
-keeps the bands meaningful on a server whose baseline is not the default `500`.
-
-| Key | Default | Band starts above |
-| --- | --- | --- |
-| `slightlyElevatedMultiplier` | `1.25` | 1.0× baseline |
-| `moderatelyElevatedMultiplier` | `2.0` | `slightlyElevatedMultiplier` |
-| `highlyElevatedMultiplier` | `4.0` | `moderatelyElevatedMultiplier` |
-| `exceptionallyElevatedMultiplier` | `8.0` | `highlyElevatedMultiplier` |
-
-Values must be finite, `>= 1.0`, and strictly increasing. Boundaries are
-inclusive on the lower band: exactly `1.25 ×` baseline is still *Slightly
-Elevated*. At or below `1.0 ×` baseline a chunk is *Normal* and nothing is drawn.
-
-These are **presentation bands**. Tensura defines no concentration tiers; the
-defaults only spread the palette over the range Tensura actually produces.
-
 ### `[palette]`
+
+The four bands are fixed; **where they sit is not** — that is per dimension and
+lives in the datapack (see below), because dimensions do not share a magicule
+scale. A chunk at its dimension's normal concentration is *Normal* and is never
+painted.
 
 | Key | Default | Band |
 | --- | --- | --- |
-| `slightlyElevatedColor` | `#29B6F6` | Slightly Elevated |
-| `slightlyElevatedOpacity` | `0.10` | |
-| `moderatelyElevatedColor` | `#5C6BC0` | Moderately Elevated |
-| `moderatelyElevatedOpacity` | `0.20` | |
-| `highlyElevatedColor` | `#AB47BC` | Highly Elevated |
-| `highlyElevatedOpacity` | `0.32` | |
-| `exceptionallyElevatedColor` | `#EC407A` | Exceptionally Elevated |
-| `exceptionallyElevatedOpacity` | `0.45` | |
+| `slightlyElevatedColor` | *(empty)* | Slightly Elevated |
+| `slightlyElevatedOpacity` | `-1` | |
+| `moderatelyElevatedColor` | *(empty)* | Moderately Elevated |
+| `moderatelyElevatedOpacity` | `-1` | |
+| `highlyElevatedColor` | *(empty)* | Highly Elevated |
+| `highlyElevatedOpacity` | `-1` | |
+| `exceptionallyElevatedColor` | *(empty)* | Exceptionally Elevated |
+| `exceptionallyElevatedOpacity` | `-1` | |
 
-Colours are `#RRGGBB`; opacity is `0.0` (invisible) to `1.0`. A normal chunk is
-never painted, whatever its opacity would be — it still reports a colour so the
-world-map hover line can appear. Keep opacities low: the overlay is meant to tint
-terrain, not hide it.
+An **empty colour** and an **opacity of `-1`** mean "use the value the server's
+datapack supplies". Set a colour to `#RRGGBB` to override that band locally (for
+contrast, or a colour-blind friendly ramp); opacity is `0.0` (invisible) to `1.0`.
+The shipped config overrides nothing, so a pack's palette arrives as authored.
 
-### `[baseline]`
-
-| Key | Default | Effect |
-| --- | --- | --- |
-| `fallback` | `500.0` | Baseline used **only** while the server cannot report Tensura's configured value (or reports an unusable one). |
-
-`500` matches Tensura's shipped `baseMagicule`. It is a fallback, never a
-definition: as soon as the server's `ServerInfoPayload` carries a usable value,
-that value is used instead. Without this fallback a server that cannot read its
-baseline would silently lose every band, and the overlay with them.
-
-The resolved value is logged once per session, so a mismatch between this and the
-server's config is visible in `latest.log`.
+A normal chunk is never painted, whatever its opacity would be — it still reports
+a colour so the world-map hover line can appear. Keep opacities low: the overlay
+is meant to tint terrain, not hide it.
 
 ### `[freshness]`
 
@@ -128,6 +104,87 @@ the missing chunks simply never arrive.
 
 ---
 
+## Datapack: per-dimension tiers
+
+This is where a dimension's bands are defined. It is **server-side and
+server-authoritative**: the server classifies each chunk and sends the band with
+the value, so every player sees the same tiers and no client config can change
+them.
+
+### Why per dimension
+
+Tensura's own data gives dimensions wildly different scales: the overworld level
+adds nothing, the nether multiplies by `1.2` and adds up to `+4500` in crimson
+forests, the end multiplies by `1.5` and adds `+4500`, and `tensura:hell` adds
+`100000` before any biome. One global baseline turns the nether and the end into a
+single flat colour, which is what this datapack exists to fix.
+
+### Files
+
+`data/<namespace>/magicule_tiers/*.json` — merged from every loaded datapack, so a
+pack can add a dimension without restating the others.
+
+```json
+{
+  "dimensions": ["minecraft:the_nether"],
+  "baseline": 600.0,
+  "bands": {
+    "slightly_elevated": 1.25,
+    "moderately_elevated": 2.0,
+    "highly_elevated": 4.0,
+    "exceptionally_elevated": 8.0
+  }
+}
+```
+
+| Field | Required | Meaning |
+| --- | --- | --- |
+| `dimensions` | yes | One or more dimension ids this entry describes. |
+| `baseline` | yes | The concentration that counts as *normal* there; finite and `> 0`. |
+| `bands` | no | Multipliers of the baseline. All four keys or none — a partial ladder is rejected. Defaults to `1.25 / 2 / 4 / 8`. |
+
+Boundaries are inclusive on the lower band, and anything at or below the baseline
+is *Normal* and unpainted. A dimension no file mentions falls back to Tensura's
+own baseline with the default ladder, i.e. the old single-baseline behaviour; if
+that baseline is unreadable the chunk is shown with no band rather than a guessed
+one.
+
+A file may instead carry `palette`:
+
+```json
+{
+  "palette": {
+    "slightly_elevated": { "color": "#29B6F6", "opacity": 0.10 }
+  }
+}
+```
+
+Bands left out keep their defaults, which lets a pack theme one band without
+restating the rest. These are the defaults the client's `[palette]` overrides
+when it names a colour.
+
+`/reload` re-reads the datapack, so a pack can retune a dimension without a
+restart. Problems (missing baseline, bad ladder, malformed dimension id, a
+dimension declared twice) are logged with the file that caused them and that file
+is skipped; the rest still applies.
+
+### Shipped entries
+
+| Dimension | Baseline | Why |
+| --- | --- | --- |
+| `minecraft:overworld` | `500` | Tensura's `baseMagicule`; `dark_forest` reaches `2000`, `deep_dark` `2500`. |
+| `minecraft:the_nether` | `600` | `baseMagicule × 1.2`; biomes add `1500`–`4500`. |
+| `minecraft:the_end` | `750` | `baseMagicule × 1.5`; end biomes add `4500`. |
+| `tensura:hell` | `100500` | `+100000` level modifier; underworld biomes add `500`–`3500`, so its ladder is tight (`1.005`–`1.03`). |
+| `tensura:labyrinth` | `30000` | `+29500` level modifier; ladder `1.25`–`1.95` spans the biome additives. |
+| `tensura:boss_area` | `500` | Flat void arena, no modifiers. |
+
+These assume Tensura's shipped `baseMagicule` of `500`. If a pack changes it, the
+nether and end figures scale with it and the hell/labyrinth ones need re-tuning —
+which is exactly the knob this datapack provides.
+
+---
+
 ## Server (`serverconfig/tensura_xaero_integration-server.toml`)
 
 ### `[sync]`
@@ -158,8 +215,9 @@ the missing chunks simply never arrive.
 
 ## Which side owns which decision
 
-- **Visual** (colours, opacity, thresholds, hover) is client-only: it changes
-  only what this player sees.
+- **Visual** (colours, opacity, hover) is client-only: it changes only what this
+  player sees. The bands themselves are server-side (the datapack), so two
+  players on one server cannot disagree about a chunk's tier.
 - **Disclosure** (`sync.enabled`, the caps, the radius) is server-side: a client
   cannot widen it, and a pack operator can switch the feature off world-wide
   without client edits.
@@ -171,8 +229,8 @@ the missing chunks simply never arrive.
 
 | Goal | Change |
 | --- | --- |
-| Quieter map | lower the opacities, raise `slightlyElevatedMultiplier` |
-| See subtler elevations | lower `slightlyElevatedMultiplier` (but `> 1.0`) |
+| Quieter map | lower the opacities, or override them in the client `[palette]` |
+| See subtler elevations | lower `slightly_elevated` in that dimension's datapack entry |
 | Cheaper on a busy server | raise `reconcileIntervalTicks`, lower `reconcileBudgetChunksPerPlayer` |
 | Fewer packets | raise `minUpdateIntervalTicks`, raise `refreshIntervalTicks`, raise `maxUpdatesPerPacket` |
 | Larger overlay area | raise client `radiusChunks` **and** server `maxSubscribeRadiusChunks` |

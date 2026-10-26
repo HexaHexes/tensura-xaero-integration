@@ -9,6 +9,7 @@ import net.neoforged.fml.config.ModConfig;
 import net.neoforged.fml.event.config.ModConfigEvent;
 import net.neoforged.fml.loading.FMLEnvironment;
 import net.neoforged.neoforge.common.NeoForge;
+import net.neoforged.neoforge.event.AddReloadListenerEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 import net.neoforged.neoforge.event.server.ServerStartedEvent;
 import net.neoforged.neoforge.event.server.ServerStoppingEvent;
@@ -19,6 +20,7 @@ import org.bitwisemadness.tensuraxaerointegration.config.ServerConfig;
 import org.bitwisemadness.tensuraxaerointegration.net.Network;
 import org.bitwisemadness.tensuraxaerointegration.server.ConcentrationServer;
 import org.bitwisemadness.tensuraxaerointegration.tensura.TensuraBridge;
+import org.bitwisemadness.tensuraxaerointegration.tiers.TierReloadListener;
 import org.slf4j.Logger;
 
 /**
@@ -56,6 +58,7 @@ public final class TensuraXaeroIntegration {
         modBus.addListener(Network::register);
         modBus.addListener(TensuraXaeroIntegration::onConfigReloaded);
 
+        NeoForge.EVENT_BUS.addListener(TensuraXaeroIntegration::onAddReloadListener);
         NeoForge.EVENT_BUS.addListener(TensuraXaeroIntegration::onServerStarted);
         NeoForge.EVENT_BUS.addListener(TensuraXaeroIntegration::onServerStopping);
         NeoForge.EVENT_BUS.addListener(TensuraXaeroIntegration::onServerTick);
@@ -63,6 +66,11 @@ public final class TensuraXaeroIntegration {
         NeoForge.EVENT_BUS.addListener(TensuraXaeroIntegration::onPlayerLoggedOut);
 
         LOGGER.info("Tensura Xaero Integration initialized (Tensura: {})", TensuraBridge.isAvailable());
+    }
+
+    /** Loads the per-dimension tier datapack on world load and on {@code /reload}. */
+    private static void onAddReloadListener(AddReloadListenerEvent event) {
+        event.addListener(new TierReloadListener());
     }
 
     private static void onServerStarted(ServerStartedEvent event) {

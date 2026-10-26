@@ -49,11 +49,24 @@ the maps simply go blank outside the loaded area again.
 
 Two config files, both optional to touch:
 
-- **Client** — which overlays and hover are on, the band thresholds, colours and
-  opacity, how bright last-known values are, how much history to remember, and how
-  far around you data is requested.
+- **Client** — which overlays and hover are on, colours and opacity (which can
+  override the pack's), how bright last-known values are, how much history to
+  remember, and how far around you data is requested.
 - **Server** — a master switch for sending concentration at all, per-player caps,
   the distance limit, and how much work reconciliation may spend per cycle.
+
+## Per-dimension tiers
+
+Dimensions do not share a magicule scale — the nether and the end are hotter than
+overworld air, and the hell dimension is orders of magnitude hotter still. So
+"elevated" is judged **per dimension**: a chunk is compared with what normal looks
+like where you are, not with one global number. The server decides the tier and
+sends it with the value, so every player on a server sees the same thing.
+
+Those tiers ship as datapack entries and are the intended knob for pack authors:
+`data/<pack>/magicule_tiers/*.json` sets a dimension's normal and, if needed, its
+own band boundaries. See
+[`docs/CONFIGURATION.md`](docs/CONFIGURATION.md#datapack-per-dimension-tiers).
 
 Defaults are chosen to look good and stay cheap. Every key, default and effect is
 documented in [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md).
