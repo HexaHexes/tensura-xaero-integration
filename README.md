@@ -125,3 +125,9 @@ GNU Lesser General Public License v2.1 — see [`LICENSE`](LICENSE).
 Copyright (c) 2026 Bitwise Madness.
 
 No third-party mod binary is bundled, redistributed or committed by this project.
+
+## AI disclosure
+
+Parts of this project were written with the assistance of AI coding tools.
+AI-assisted code, data and documentation ship only after human review by the
+maintainers.
