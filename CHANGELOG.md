@@ -6,16 +6,20 @@ semantic versioning with pre-release suffixes.
 
 ## [0.1.0-alpha.12] — 2026-10-26
 
-No behaviour change: the per-frame paint path and the expiry sweep stop allocating
-and stop fighting over one lock.
+No behaviour change: the map paint path and the expiry sweep stop allocating and
+stop fighting over one lock.
+
+Xaero asks a highlighter about every visible chunk when it (re)builds a map tile,
+not on every frame; only the hover line is a per-frame query, and that is memoised
+separately below.
 
 ### Changed
 
 - **The palette is resolved once, not once per chunk.** Both highlighters asked
-  `ClientConfig.palette` for every visible chunk every frame, which built a palette,
-  four tier styles and performed eight config lookups each time. It is now memoised
-  until a config reload (`ClientConfig.invalidatePalette`) or a different server
-  palette arrives.
+  `ClientConfig.palette` for every visible chunk on every tile rebuild, which built
+  a palette, four tier styles and performed eight config lookups each time. It is
+  now memoised until a config reload (`ClientConfig.invalidatePalette`) or a
+  different server palette arrives.
 - **Chunk keys are built without a dimension string per call.** `location().toString()`
   allocated a String for every chunk drawn; the last dimension id is memoised in
   `ClientConcentration.dimensionIdOf`, which the region keys use too.
@@ -28,6 +32,23 @@ and stop fighting over one lock.
   repaint rewrote eviction order under the lock the tick thread writes with. Recency
   now follows writes: the chunk still being confirmed keeps its slot, and what is on
   screen no longer decides what survives.
+- **The hover line is built once, not once per frame.** `HoverText.describe` runs on
+  every map frame for the block under the cursor, and each call ran a `String.format`
+  for the number plus two `Component.translatable` nodes - the same three results
+  while the pointer and the value held still. The line is now remembered and reused
+  until the value, its liveness or its band changes (the chunk key is reused too),
+  so a still hover only reads the store.
+- **The mapped-chunk walks stop boxing every hit.** `XaeroWorldMapAccess` and
+  `XaeroMinimapAccess` collected packed positions into a `HashSet<Long>`, so every
+  mapped chunk in the window allocated a `Long` - the dominant cost of a walk that
+  runs on the subscribe tick. Both now return a `LongSet` (`LongOpenHashSet`), as do
+  the two bridges and `ClientConcentration.mappedChunksNearby`, so a hit is stored
+  as the primitive it already is. Empty answers are the shared `LongSets.emptySet()`.
+- **The world map's mapped test allocates nothing.** `WorldMapBridge.isChunkMapped`
+  asked for a one-chunk square, which built a `HashSet`, packed a long and walked
+  every loaded cave layer to answer a yes/no question. `XaeroWorldMapAccess.isMapped`
+  now tests that chunk directly and stops at the first layer that has a tile; the
+  layer walk's callback writes into one reusable probe instead of a fresh set.
 - **Expiry sweeps only current values.** It used to copy the entire cache - up to
   `maxEntriesPerWorld`, 20 000 by default and 250 000 possible - into a snapshot
   every second, though only live values can expire and most of a long session's

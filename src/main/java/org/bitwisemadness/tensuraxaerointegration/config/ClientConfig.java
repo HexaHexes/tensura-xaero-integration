@@ -190,10 +190,11 @@ public final class ClientConfig {
      * <p>An empty colour or an opacity of {@code -1} leaves that band as the
      * server sent it, which is why the shipped config overrides nothing.</p>
      *
-     * <p>Memoised. Both map highlighters ask per chunk per frame, and resolving
-     * this means building a palette plus eight config lookups; doing that per
-     * chunk is a measurable cost for a value that changes when the config or the
-     * server's palette changes. Call {@link #invalidatePalette()} on reload.</p>
+     * <p>Memoised. Both map highlighters ask once per visible chunk on every tile
+     * rebuild, and resolving this means building a palette plus eight config
+     * lookups; doing that per chunk is a measurable cost for a value that changes
+     * when the config or the server's palette changes. Call
+     * {@link #invalidatePalette()} on reload.</p>
      */
     public static OverlayPalette palette(OverlayPalette serverPalette) {
         OverlayPalette server = serverPalette == null ? OverlayPalette.defaults() : serverPalette;

@@ -22,12 +22,13 @@ import java.util.Set;
  *       play session cannot grow the cache without bound.</li>
  * </ul>
  *
- * <p>Reads are read-only. This class is read per visible chunk per frame by two
- * Xaero highlighters on the map's render threads, so a lookup that touched the
- * eviction order - as an access-ordered map does - would turn every repaint into
- * a mutation under the same lock the tick thread writes with, and would let what
- * is on screen decide what survives. Recency therefore follows writes: the chunk
- * the server is still confirming is the one that keeps its slot.</p>
+ * <p>Reads are read-only. Two Xaero highlighters read this class per visible chunk
+ * whenever they (re)build a map tile, from the map's render/writer threads, so a
+ * lookup that touched the eviction order - as an access-ordered map does - would
+ * turn every repaint into a mutation under the same lock the tick thread writes
+ * with, and would let what is on screen decide what survives. Recency therefore
+ * follows writes: the chunk the server is still confirming is the one that keeps
+ * its slot.</p>
  *
  * <p>This class never decides <em>whether</em> a chunk may be cached; that
  * decision belongs to the caller (mapped-only ingress on the client, the

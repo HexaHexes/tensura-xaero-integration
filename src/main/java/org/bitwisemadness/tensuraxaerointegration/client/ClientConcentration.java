@@ -1,8 +1,9 @@
 package org.bitwisemadness.tensuraxaerointegration.client;
 
+import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
+import it.unimi.dsi.fastutil.longs.LongSet;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -148,8 +149,9 @@ public final class ClientConcentration {
      * The dimension id this mod keys chunks by, memoised.
      *
      * <p>{@code location().toString()} builds a new String on every call, and the
-     * map highlighters ask for a chunk key per visible chunk per frame. A map
-     * draws one dimension at a time, so a single remembered entry covers it.</p>
+     * map highlighters ask for a chunk key once per visible chunk every time they
+     * rebuild a tile. A map draws one dimension at a time, so a single remembered
+     * entry covers it.</p>
      */
     public String dimensionIdOf(ResourceKey<Level> dimension) {
         DimensionMemo memo = this.dimensionMemo;
@@ -382,7 +384,7 @@ public final class ClientConcentration {
         int radius = ClientConfig.subscribeRadiusChunks();
         int centerX = minecraft.player.chunkPosition().x;
         int centerZ = minecraft.player.chunkPosition().z;
-        Set<Long> mapped = mappedChunksNearby(minecraft);
+        LongSet mapped = mappedChunksNearby(minecraft);
         String token = this.worldToken.isBlank() ? "unknown" : this.worldToken;
         Set<ChunkCacheKey> wanted = new LinkedHashSet<>();
         for (long packed : mapped) {
@@ -517,11 +519,11 @@ public final class ClientConcentration {
                 "{} chunk(s) left the request range; their values are now last known", count);
     }
 
-    private Set<Long> mappedChunksNearby(Minecraft minecraft) {
+    private LongSet mappedChunksNearby(Minecraft minecraft) {
         int centerX = minecraft.player.chunkPosition().x;
         int centerZ = minecraft.player.chunkPosition().z;
         int radius = ClientConfig.subscribeRadiusChunks();
-        Set<Long> mapped = new HashSet<>();
+        LongSet mapped = new LongOpenHashSet();
         if (XaeroMods.worldMapPresent()) {
             mapped.addAll(WorldMapBridge.mappedChunks(minecraft.level.dimension(), centerX, centerZ, radius));
         }

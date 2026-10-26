@@ -1,7 +1,9 @@
 package org.bitwisemadness.tensuraxaerointegration.client;
 
-import java.util.HashSet;
-import java.util.Set;
+import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
+import it.unimi.dsi.fastutil.longs.LongSet;
+import it.unimi.dsi.fastutil.longs.LongSets;
+import java.util.function.BiConsumer;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.level.Level;
 import org.bitwisemadness.tensuraxaerointegration.net.PackedChunkPos;
@@ -27,23 +29,38 @@ import xaero.map.world.MapWorld;
  */
 final class XaeroWorldMapAccess {
 
+    /**
+     * Reused by {@link #isMapped} so a single-chunk test allocates nothing.
+     *
+     * <p>The layer walk only offers a callback, so the answer has to be written
+     * somewhere; one instance is reused instead of building a result set. The map
+     * state it reads is client-thread-only, which makes the probe too.</p>
+     */
+    private static final AnyMappedProbe ANY_MAPPED = new AnyMappedProbe();
+
     private XaeroWorldMapAccess() {
     }
 
-    static Set<Long> mappedChunks(ResourceKey<Level> dimension, int centerChunkX, int centerChunkZ, int radius) {
+    /**
+     * Chunks in the square that any loaded layer holds a tile for.
+     *
+     * <p>A primitive set: the result is keyed by packed position, so a boxed
+     * {@code Long} per hit would be the walk's whole allocation cost.</p>
+     */
+    static LongSet mappedChunks(ResourceKey<Level> dimension, int centerChunkX, int centerChunkZ, int radius) {
         MapProcessor processor = processor();
         if (processor == null) {
-            return Set.of();
+            return LongSets.emptySet();
         }
         MapWorld world = processor.getMapWorld();
         if (world == null) {
-            return Set.of();
+            return LongSets.emptySet();
         }
         MapDimension mapDimension = world.getDimension(dimension);
         if (mapDimension == null) {
-            return Set.of();
+            return LongSets.emptySet();
         }
-        Set<Long> mapped = new HashSet<>();
+        LongSet mapped = new LongOpenHashSet();
         // Every cave layer the map currently holds, so a chunk explored only in
         // cave mode still counts as mapped.
         mapDimension.getLayeredMapRegions().applyToEachLoadedLayer((layer, mapLayer) -> {
@@ -58,6 +75,28 @@ final class XaeroWorldMapAccess {
         return mapped;
     }
 
+    /**
+     * Whether any loaded layer holds a tile for this chunk.
+     *
+     * <p>The single-chunk form of {@link #mappedChunks}: it stops at the first hit
+     * and builds no set, so answering it costs no allocation.</p>
+     */
+    static boolean isMapped(ResourceKey<Level> dimension, int chunkX, int chunkZ) {
+        MapProcessor processor = processor();
+        if (processor == null) {
+            return false;
+        }
+        MapWorld world = processor.getMapWorld();
+        if (world == null) {
+            return false;
+        }
+        MapDimension mapDimension = world.getDimension(dimension);
+        if (mapDimension == null) {
+            return false;
+        }
+        return ANY_MAPPED.test(mapDimension, chunkX, chunkZ);
+    }
+
     private static boolean isMapped(MapLayer layer, int chunkX, int chunkZ) {
         MapRegion region = layer.getMapRegions().getLeaf(chunkX >> 5, chunkZ >> 5);
         if (region == null) {
@@ -65,6 +104,29 @@ final class XaeroWorldMapAccess {
         }
         MapTileChunk tileChunk = region.getChunk(chunkX >> 2 & 7, chunkZ >> 2 & 7);
         return tileChunk != null && tileChunk.getTile(chunkX & 3, chunkZ & 3) != null;
+    }
+
+    /** Writes what one chunk's any-layer test found; see {@link #ANY_MAPPED}. */
+    private static final class AnyMappedProbe implements BiConsumer<Integer, MapLayer> {
+
+        private int chunkX;
+        private int chunkZ;
+        private boolean found;
+
+        boolean test(MapDimension dimension, int chunkX, int chunkZ) {
+            this.chunkX = chunkX;
+            this.chunkZ = chunkZ;
+            this.found = false;
+            dimension.getLayeredMapRegions().applyToEachLoadedLayer(this);
+            return this.found;
+        }
+
+        @Override
+        public void accept(Integer layerIndex, MapLayer layer) {
+            if (!this.found) {
+                this.found = isMapped(layer, this.chunkX, this.chunkZ);
+            }
+        }
     }
 
     static void refreshRegion(ResourceKey<Level> dimension, int regionX, int regionZ) {

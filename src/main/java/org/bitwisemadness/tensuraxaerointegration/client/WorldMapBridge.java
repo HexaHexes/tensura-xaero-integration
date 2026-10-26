@@ -1,6 +1,7 @@
 package org.bitwisemadness.tensuraxaerointegration.client;
 
-import java.util.Set;
+import it.unimi.dsi.fastutil.longs.LongSet;
+import it.unimi.dsi.fastutil.longs.LongSets;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
@@ -34,20 +35,34 @@ public final class WorldMapBridge {
      * <p>Empty when the mod or its session is absent, or when the integration
      * cannot read the map (never fatal).</p>
      */
-    public static Set<Long> mappedChunks(ResourceKey<Level> dimension, int centerChunkX, int centerChunkZ, int radius) {
+    public static LongSet mappedChunks(ResourceKey<Level> dimension, int centerChunkX, int centerChunkZ, int radius) {
         if (!available() || dimension == null) {
-            return Set.of();
+            return LongSets.emptySet();
         }
         try {
             return XaeroWorldMapAccess.mappedChunks(dimension, centerChunkX, centerChunkZ, radius);
         } catch (Throwable failure) {
             logFailure(failure);
-            return Set.of();
+            return LongSets.emptySet();
         }
     }
 
+    /**
+     * Whether the World Map holds a tile for this chunk.
+     *
+     * <p>Asks for that one chunk rather than building the one-chunk set, so this
+     * allocates nothing on the path that runs it per received chunk.</p>
+     */
     public static boolean isChunkMapped(ResourceKey<Level> dimension, int chunkX, int chunkZ) {
-        return !mappedChunks(dimension, chunkX, chunkZ, 0).isEmpty();
+        if (!available() || dimension == null) {
+            return false;
+        }
+        try {
+            return XaeroWorldMapAccess.isMapped(dimension, chunkX, chunkZ);
+        } catch (Throwable failure) {
+            logFailure(failure);
+            return false;
+        }
     }
 
     /** Clears one region's cached highlight hash so the map repaints it. */

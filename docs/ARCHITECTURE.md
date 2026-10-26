@@ -241,6 +241,11 @@ on the network thread.
 `mappedChunks(dimension, cx, cz, radius)`, `refreshRegion(RegionKey)`. They call
 into `XaeroWorldMapAccess` / `XaeroMinimapAccess` only after the gate.
 
+`mappedChunks` returns a `LongSet` of packed positions, not a `Set<Long>`: the walk
+runs on every subscribe tick over everything the maps hold in range, and a boxed
+`Long` per hit was most of what it allocated. The empty answer is the shared
+`LongSets.emptySet()`, which callers only ever merge from.
+
 ### `client/XaeroWorldMapAccess` / `client/XaeroMinimapAccess`
 The Xaero-aware classes:
 
@@ -249,6 +254,10 @@ The Xaero-aware classes:
   for the minimap — i.e. "a tile actually exists for this chunk", which is what
   Xaero itself means by mapped. Chunk-loaded, chunk-generated and
   server-visited are *not* substitutes.
+- the single-chunk test (`isMapped`) asks for that chunk directly, stopping at the
+  first loaded layer that has a tile. The world map's layer walk only offers a
+  callback, so one reusable probe holds the answer; `isChunkMapped` no longer
+  builds a one-element result set per call.
 - repaint: `DimensionHighlighterHandler.clearCachedHash(regionX, regionZ)` on the
   world map and `requestRefresh(regionX, regionZ)` on the minimap writer, both
   guarded to the dimension currently being viewed.
@@ -269,7 +278,12 @@ and colour, so the two maps can never disagree:
   per-region version, so a region repaints exactly when one of its values changed.
 - `getBlockHighlightSubtleTooltip` / `getBlockHighlightBluntTooltip` (world map
   only) — the hovered block's chunk, never the player's chunk, rendered through
-  `client/HoverText` and `util/ConcentrationText`.
+  `client/HoverText` and `util/ConcentrationText`. Xaero asks for the blunt tooltip
+  every frame and only reads what it gets back, so `HoverText` remembers the line it
+  last built and returns it while the value, its liveness and its band are unchanged:
+  a still hover does no number formatting and builds no component graph. The
+  remembered line is a translatable component, so a language reload still takes
+  effect.
 
 Constructors pass `coveringOutsideDiscovered = false`, so Xaero's own discovered
 gate is an additional outer barrier for anything this code might miss.
@@ -305,17 +319,24 @@ world-map-only install loads only what exists.
 | `cache/ConcentrationFileFormat` | strict binary codec for the persisted last-known values |
 | `client/ClientConcentrationStore` | mapped-only ingress, live/last-known states, replay, region versions |
 
-The store's read path is shaped by who calls it: two Xaero highlighters ask
-`chunkIsHighlit` and `getColors` for every visible chunk on every frame, from the
-map's render threads. So `hasValue` answers "paint or not" without building an
-observation, `ClientConcentration.dimensionIdOf` memoises the one dimension string
-a frame needs, `ConcentrationClassification.byCode` returns the constant instead
-of an `Optional`, and `ClientConfig.palette` memoises the resolved palette until
-the config reloads or the server sends a different one (each of those was
-previously rebuilt per chunk, with eight config lookups). Expiry is a sweep over
-the cache's *live* keys rather than a snapshot of the whole map: most of a long
-session's cache is remembered history that can never expire, and copying it every
-second held the lock the renderer needs.
+The store's read path is shaped by who calls it. Two Xaero highlighters ask
+`chunkIsHighlit` and `getColors` for every visible chunk each time they (re)build
+a map tile's texture - `LeafRegionTexture.applyHighlights` and
+`MapRegionHighlightsPreparer` on the world map, `MinimapWriter.writeTile` on the
+minimap - from the map's render/writer threads. The one query Xaero makes on every
+frame is the hover line: `GuiMap`'s draw asks `getBlockHighlightBluntTooltip` for
+the chunk under the cursor each time it renders, which is why that line is
+memoised (see the highlighter section below).
+
+So `hasValue` answers "paint or not" without building an observation,
+`ClientConcentration.dimensionIdOf` memoises the one dimension string a tile needs,
+`ConcentrationClassification.byCode` returns the constant instead of an `Optional`,
+and `ClientConfig.palette` memoises the resolved palette until the config reloads
+or the server sends a different one (each of those was previously rebuilt per
+chunk, with eight config lookups). Expiry is a sweep over the cache's *live* keys
+rather than a snapshot of the whole map: most of a long session's cache is
+remembered history that can never expire, and copying it every second held the
+lock the renderer needs.
 
 These carry the logic that the specification cares about, which is why the JUnit
 suite can cover it without a game client.

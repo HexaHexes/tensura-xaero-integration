@@ -46,7 +46,7 @@ public final class MinimapConcentrationOverlay extends ChunkHighlighter {
             return false;
         }
         // Answers without building an observation; the minimap asks this and
-        // getColors for the same chunk on every frame.
+        // getColors for the same chunk every time it writes a tile.
         return ClientConcentration.get().store()
                 .hasValue(ClientConcentration.get().key(dimension, chunkX, chunkZ));
     }

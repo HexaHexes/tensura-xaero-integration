@@ -406,8 +406,8 @@ public final class ClientConcentrationStore {
      * Whether anything displayable is held for a chunk, current or remembered.
      *
      * <p>What a map's "is this chunk highlit" hook needs, and it allocates
-     * nothing - unlike {@link #observe}, which is called once per chunk per frame
-     * by both highlighters.</p>
+     * nothing - unlike {@link #observe}, which both highlighters call once per
+     * chunk each time they rebuild a tile.</p>
      */
     public boolean hasValue(ChunkCacheKey key) {
         return this.cache.hasAvailable(key);
