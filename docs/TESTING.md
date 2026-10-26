@@ -43,6 +43,13 @@ A run killed before its tests register prints nothing extra; both cases fail the
 build, and the CI `gametest` job is capped at 15 minutes as a backstop for a hang
 that outlives the Gradle timeout.
 
+Ten seconds before that kill, the build dumps every thread of the forked server to
+`run/logs/gametest-thread-dump.txt` — only when the log shows its tests running and
+none complete — and the `reportGametestStall` message names the file. The server is
+found by the program-arguments file Gradle hands it
+(`build/moddev/gameTestServerRunProgramArgs.txt`), because its launch target sits
+inside that file rather than on the command line.
+
 ## 2. Latest results (2026-10-25, local, Windows / Git Bash)
 
 | Command | Result |

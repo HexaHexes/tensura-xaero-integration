@@ -6,6 +6,7 @@ import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.level.Level;
 import org.bitwisemadness.tensuraxaerointegration.TensuraXaeroIntegration;
 import org.bitwisemadness.tensuraxaerointegration.cache.RegionKey;
+import org.bitwisemadness.tensuraxaerointegration.cache.RegionKeyMemo;
 import org.bitwisemadness.tensuraxaerointegration.client.ClientConcentration;
 import org.bitwisemadness.tensuraxaerointegration.client.ClientConcentrationStore;
 import org.bitwisemadness.tensuraxaerointegration.client.HoverText;
@@ -51,6 +52,12 @@ public final class WorldMapConcentrationOverlay extends ChunkHighlighter {
      * threads both ask, and one array shared between them would race.</p>
      */
     private static final ThreadLocal<int[]> COLORS = ThreadLocal.withInitial(() -> new int[5]);
+
+    /**
+     * The region key last asked for: Xaero asks a region's gate and then its hash
+     * while rebuilding it, and this one instance covers both.
+     */
+    private final RegionKeyMemo regionKeys = new RegionKeyMemo();
 
     private WorldMapConcentrationOverlay() {
         super(false);
@@ -141,7 +148,7 @@ public final class WorldMapConcentrationOverlay extends ChunkHighlighter {
         // The minimap has its own highlighter; nothing to add here.
     }
 
-    private static RegionKey regionKey(ResourceKey<Level> dimension, int regionX, int regionZ) {
-        return new RegionKey(ClientConcentration.get().dimensionIdOf(dimension), regionX, regionZ);
+    private RegionKey regionKey(ResourceKey<Level> dimension, int regionX, int regionZ) {
+        return this.regionKeys.keyFor(ClientConcentration.get().dimensionIdOf(dimension), regionX, regionZ);
     }
 }

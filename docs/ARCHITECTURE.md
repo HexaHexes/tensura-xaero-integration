@@ -297,6 +297,9 @@ and colour, so the two maps can never disagree:
   `observe` stays for the hover line, which does need the number.
 - `calculateRegionHash` / `regionHasHighlights` — derived from the store's
   per-region version, so a region repaints exactly when one of its values changed.
+  Xaero asks both for the same region while rebuilding it, so the world map remembers
+  the last `RegionKey` (`cache/RegionKeyMemo`) instead of building one per call; the
+  minimap asks once per region, where a memo could never hit.
 - `getBlockHighlightSubtleTooltip` / `getBlockHighlightBluntTooltip` (world map
   only) — the hovered block's chunk, never the player's chunk, rendered through
   `client/HoverText` and `util/ConcentrationText`. Xaero asks for the blunt tooltip

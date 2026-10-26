@@ -47,6 +47,16 @@ separately below.
   Xaero's `getChunkHighlitColor` copies those five entries into its own result store
   before returning, and per thread because the map's render and writer threads both
   ask.
+- **The region hash queries reuse one `RegionKey`.** Xaero asks a highlighter for a
+  region's gate and then its hash while rebuilding that one region, and both built a
+  `RegionKey` per call. The world-map overlay remembers the last key
+  (`cache/RegionKeyMemo`), so the second call is free; the minimap asks once per region,
+  where a memo could never hit.
+- **A wedged GameTest run now explains itself.** The harness dumps every thread of the
+  forked server to `run/logs/gametest-thread-dump.txt` ten seconds before its timeout
+  kills it, and the stall message names the file. The server is located by the
+  program-arguments file Gradle hands it, since its launch target is inside that file
+  rather than on the command line.
 - **The paint path no longer builds a cache key per chunk.** `ConcentrationCache` is
   authoritative on `ChunkCacheKey` because eviction order, the live set and the on-disk
   snapshot all need it, but a tile rebuild asks about hundreds of chunks and a record
