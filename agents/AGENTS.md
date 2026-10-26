@@ -173,6 +173,13 @@ Before starting any new development in this repo:
   `require-review-from-write-access` (one approving review; the listed org owners
   bypass). Direct pushes to the default branch are rejected by GitHub.
 - `version-bump.yml` opens an isolated version-bump PR (only the version file changes).
+- `release.yml` runs on every push to `main`: it builds, re-asserts the JUnit and
+  GameTest results, then tags and publishes. Anything without a version bump, or
+  with an `-alpha` suffix, is an **alpha** and only publishes when the
+  `ALPHA_RELEASES` repository variable is `true`; alpha tags carry the commit
+  (`vX.Y.Z+g<sha>`) and the jar asset is stamped with it. Betas and stables are
+  gated on an isolated version bump. No CurseForge dispatch here: this repo has
+  no CurseForge listing.
 - CurseForge publishing (`curseforge.yml`) is **deferred** until the mod has a CurseForge
   listing and the `CURSEFORGE_PROJECT_ID` / `CURSEFORGE_API_KEY` secrets. Do not add it
   speculatively.
