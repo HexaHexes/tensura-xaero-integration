@@ -76,6 +76,7 @@ public final class ClientConcentrationStore {
 
     private long tick;
     private double baseline = Double.NaN;
+    private double fallbackBaseline = Double.NaN;
 
     public ClientConcentrationStore(int maxEntries) {
         this.cache = new ConcentrationCache(maxEntries);
@@ -105,6 +106,28 @@ public final class ClientConcentrationStore {
     /** The server-supplied baseline, or NaN when unknown. */
     public double baseline() {
         return this.baseline;
+    }
+
+    /**
+     * Sets the baseline to classify against while the server has not supplied
+     * one, so a server that cannot report its configured value does not silently
+     * remove every band (and with them the whole overlay).
+     *
+     * @param fallback a finite positive value, or NaN to disable the fallback
+     */
+    public void setFallbackBaseline(double fallback) {
+        if (!Double.isNaN(fallback) && (!Double.isFinite(fallback) || fallback <= 0.0)) {
+            throw new IllegalArgumentException("fallback baseline must be positive or NaN, was " + fallback);
+        }
+        this.fallbackBaseline = fallback;
+    }
+
+    /** The baseline actually used for classification: the server's, else the fallback. */
+    public double effectiveBaseline() {
+        if (Double.isFinite(this.baseline) && this.baseline > 0.0) {
+            return this.baseline;
+        }
+        return this.fallbackBaseline;
     }
 
     /**
@@ -184,8 +207,9 @@ public final class ClientConcentrationStore {
         ConcentrationEntry value = entry.get();
         boolean live = value.fresh(this.tick, staleAfterTicks);
         Optional<ConcentrationClassification> classification = Optional.empty();
-        if (Double.isFinite(this.baseline) && this.baseline > 0.0) {
-            classification = thresholds.classifyIfValid(value.value(), this.baseline);
+        double baseline = effectiveBaseline();
+        if (Double.isFinite(baseline) && baseline > 0.0) {
+            classification = thresholds.classifyIfValid(value.value(), baseline);
         }
         return Optional.of(new Observation(value.value(), classification, live));
     }

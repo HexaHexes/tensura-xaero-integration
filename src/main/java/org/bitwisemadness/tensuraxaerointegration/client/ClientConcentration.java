@@ -13,6 +13,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.level.Level;
 import net.neoforged.fml.loading.FMLPaths;
 import net.neoforged.neoforge.network.PacketDistributor;
+import org.bitwisemadness.tensuraxaerointegration.TensuraXaeroIntegration;
 import org.bitwisemadness.tensuraxaerointegration.cache.ChunkCacheKey;
 import org.bitwisemadness.tensuraxaerointegration.cache.ConcentrationFileFormat;
 import org.bitwisemadness.tensuraxaerointegration.cache.RegionKey;
@@ -179,6 +180,7 @@ public final class ClientConcentration {
         this.dimensionId = "";
         this.lastSubscribeTick = 0;
         this.subscribeRefreshDue = true;
+        ClientPayloadHandler.resetBaselineLog();
     }
 
     // --- persistence -------------------------------------------------------
@@ -260,6 +262,9 @@ public final class ClientConcentration {
             // The baseline is per world; a dimension change keeps it.
             store().clearBaseline();
         }
+        // Until the server reports its own value, classify against the configured
+        // fallback instead of against nothing (which would hide every band).
+        store().setFallbackBaseline(ClientConfig.fallbackBaseline());
         // Replay this world's remembered values. Live answers replace them within
         // a tick or two for whatever the server currently has loaded.
         loadFromDisk(token);

@@ -5,6 +5,7 @@ import java.util.Optional;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.level.Level;
+import org.bitwisemadness.tensuraxaerointegration.TensuraXaeroIntegration;
 import org.bitwisemadness.tensuraxaerointegration.cache.RegionKey;
 import org.bitwisemadness.tensuraxaerointegration.client.ClientConcentration;
 import org.bitwisemadness.tensuraxaerointegration.client.ClientConcentrationStore.Observation;
@@ -37,6 +38,10 @@ public final class WorldMapConcentrationOverlay extends ChunkHighlighter {
 
     public static final WorldMapConcentrationOverlay INSTANCE = new WorldMapConcentrationOverlay();
 
+    /** One-shot diagnostics, so "nothing is drawn" can be located from the log. */
+    private static volatile boolean loggedHighlit;
+    private static volatile boolean loggedPainted;
+
     private WorldMapConcentrationOverlay() {
         super(false);
     }
@@ -68,10 +73,22 @@ public final class WorldMapConcentrationOverlay extends ChunkHighlighter {
             return null;
         }
         Observation value = observation.get();
+        if (!loggedHighlit) {
+            loggedHighlit = true;
+            TensuraXaeroIntegration.LOGGER.info(
+                    "World map is drawing concentration data (first chunk {},{}: value {} live={} band={})",
+                    chunkX, chunkZ, value.value(), value.live(), value.classification());
+        }
         // A value that is no longer refreshed is drawn dimmer, never as bright as
         // a current one; a normal chunk stays fully transparent either way.
         double scale = value.live() ? 1.0 : ClientConfig.historicalOpacityScale();
         int colour = ClientConfig.palette().xaeroColorFor(value.classification().orElse(null), scale);
+        if (!loggedPainted && (colour & 0xFF) > 0) {
+            loggedPainted = true;
+            TensuraXaeroIntegration.LOGGER.info(
+                    "World map overlay is painting (first painted chunk {},{}: band={} alpha={})",
+                    chunkX, chunkZ, value.classification(), colour & 0xFF);
+        }
         return new int[] {colour, colour, colour, colour, colour};
     }
 

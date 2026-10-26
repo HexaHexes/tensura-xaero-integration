@@ -55,6 +55,9 @@ public final class ConcentrationServer {
     /** How often the authoritative baseline is re-sent to every player. */
     private static final int BASELINE_REFRESH_INTERVAL_TICKS = 600;
 
+    /** Retry delay while Tensura's baseline cannot be read at all. */
+    private static final int BASELINE_RETRY_TICKS = 100;
+
     private final Map<UUID, PlayerState> players = new LinkedHashMap<>();
 
     private MinecraftServer server;
@@ -215,6 +218,11 @@ public final class ConcentrationServer {
             this.lastBaselineTick = now;
         }
         double baseline = readOrNaN(TensuraBridge.baseline());
+        if (Double.isNaN(baseline)) {
+            // Tensura's config can be unreadable for a moment; retry soon rather
+            // than leaving clients without a baseline for the full interval.
+            this.lastBaselineTick = now - BASELINE_REFRESH_INTERVAL_TICKS + BASELINE_RETRY_TICKS;
+        }
 
         for (PlayerState state : this.players.values()) {
             ServerPlayer player = server.getPlayerList().getPlayer(state.id);

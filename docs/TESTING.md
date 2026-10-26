@@ -28,14 +28,14 @@ CI job starts from a clean checkout, so it cannot hit it.
 
 | Command | Result |
 | --- | --- |
-| `./gradlew test` | **102 tests, 0 failures, 0 errors** (9 classes) |
+| `./gradlew test` | **105 tests, 0 failures, 0 errors** (9 classes) |
 | `./gradlew build` | **BUILD SUCCESSFUL**, jar produced |
 | `./gradlew runGameTestServer` | **5 tests ran, all passed** — `All 5 required tests passed :)`, task reported `GameTest OK: all 5 tests passed` |
 
 These are the only runs backing the claims in this repository. Nothing
 client-rendering related was verified — see §6.
 
-## 3. JUnit suite (102 tests)
+## 3. JUnit suite (105 tests)
 
 All of these compile and run without Minecraft because the logic sits in
 Minecraft-free classes.
@@ -46,7 +46,7 @@ Minecraft-free classes.
 | `concentration/OverlayPaletteTest` | default palette, `#RRGGBB` parsing incl. malformed input, opacity clamping, Xaero colour encoding (`blue<<24 \| green<<16 \| red<<8 \| alpha`), zero-alpha normal chunks |
 | `cache/CacheKeyAndCacheTest` | key isolation across world token, dimension and coordinates; value/replace/invalidate/clear; missing-data vs valid-zero distinction; bounded size and eviction |
 | `refresh/RefreshSchedulingTest` | `UpdateQueue` change detection and deduplication, per-chunk minimum interval (delayed, never dropped), bounded drain, `retainOnly` pruning, `ReconcileCursor` rotation and budget covering the whole set |
-| `client/ClientConcentrationStoreTest` | mapped-only ingress (an unmapped chunk cannot be stored even when offered), live→last-known demotion and promotion, stale/unavailable handling, replay that never overwrites live data, region version bumps on visible changes only, `clearBaseline` |
+| `client/ClientConcentrationStoreTest` | mapped-only ingress (an unmapped chunk cannot be stored even when offered), live→last-known demotion and promotion, stale/unavailable handling, replay that never overwrites live data, region version bumps on visible changes only, the fallback baseline (used only until the server answers, rejected when invalid), `clearBaseline` |
 | `cache/ConcentrationFileFormatTest` | write/read round trip, empty file, wrong magic, unknown version, row limit, negative count, non-finite value, truncation, invalid row/baseline construction |
 | `client/ConcentrationStorageTest` | save and load a world, queued save plus flush, missing and corrupt files read as no history, per-world name uniqueness and sanitising (no path escape) |
 | `net/PackedChunkPosTest` | packing/unpacking incl. negative and extreme coordinates |

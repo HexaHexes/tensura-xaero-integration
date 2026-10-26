@@ -73,11 +73,15 @@ terrain, not hide it.
 
 | Key | Default | Effect |
 | --- | --- | --- |
-| `fallback` | `500.0` | Baseline used **only** until the server reports Tensura's configured value. |
+| `fallback` | `500.0` | Baseline used **only** while the server cannot report Tensura's configured value (or reports an unusable one). |
 
 `500` matches Tensura's shipped `baseMagicule`. It is a fallback, never a
-definition: as soon as the server's `BaselinePayload` arrives, that value is used
-and this one is ignored for the rest of the session.
+definition: as soon as the server's `BaselinePayload` carries a usable value,
+that value is used instead. Without this fallback a server that cannot read its
+baseline would silently lose every band, and the overlay with them.
+
+The resolved value is logged once per session, so a mismatch between this and the
+server's config is visible in `latest.log`.
 
 ### `[freshness]`
 

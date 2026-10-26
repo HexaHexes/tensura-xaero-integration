@@ -145,6 +145,37 @@ io.github.manasmods.tensura.config.AreaMagiculeConfig extends ManasConfig
   presentation concept by definition.
 - Unit: plain config units of "magicule" (no name/suffix attached).
 
+### 2.3.1 What actually limits a chunk's value **(verified)**
+
+A chunk's stored maximum starts at `baseMagicule` and is then modified by the
+`tensura:biome_magicule` entry for the biome at the chunk's middle position and
+the `tensura:level_magicule` entry for the dimension (`ChunkStorage#getMaxMagicule`
+→ `MagiculeCacheEntry#getMaxMagicule`, modifiers applied in priority order).
+Tensura's `tick()` then moves the value to that maximum in one step, so a loaded
+chunk reads its computed maximum almost immediately.
+
+The shipped data files decide the ceilings:
+
+| Modifier file | Effect |
+| --- | --- |
+| `minecraft:level_magicule/overworld` | **no modifiers at all** - the overworld level contributes nothing |
+| `minecraft:biome_magicule/dark_forest` | `ADD 1500` |
+| `minecraft:biome_magicule/deep_dark` | `ADD 2000` |
+| `minecraft:biome_magicule/basalt_deltas` | `ADD 2500` |
+| `minecraft:biome_magicule/crimson_forest`, `end_*` | `ADD 4500` |
+| `minecraft:biome_magicule/warped_forest` | `ADD 3500` |
+| every other overworld biome | no entry |
+| `tensura:level_magicule/hell` | `ADD 100000` |
+| `tensura:biome_magicule/ancient_forest`, `miasmic_plains` | `ADD 19500` |
+| `tensura:biome_magicule/barren_land` | `ADD 45500` |
+
+With the shipped `baseMagicule = 500` that means ordinary overworld biomes sit at
+exactly **500**, dark forest at **2000**, deep dark at **2500**; nothing in the
+overworld can reach the configured `maximumMagicule` of 1,000,000, and a magic
+engine nearby (`magicEngineReduction = 1000`) subtracts further. Any world where
+the overworld tops out at 1500 has a `baseMagicule` of 0 (1500 is precisely the
+dark-forest addend), or a pack-level override of these files.
+
 ### 2.4 Missing data **(verified)**
 
 - `TensuraStorages.getChunkFrom` returns `null` when the chunk has no registered

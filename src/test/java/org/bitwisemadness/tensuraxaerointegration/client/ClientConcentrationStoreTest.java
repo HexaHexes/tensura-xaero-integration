@@ -181,6 +181,43 @@ class ClientConcentrationStoreTest {
     }
 
     @Test
+    void the_configured_fallback_classifies_while_the_server_has_not_answered() {
+        ClientConcentrationStore store = new ClientConcentrationStore(8);
+        store.setFallbackBaseline(500.0);
+        store.offer(CHUNK, true, 1500.0);
+
+        Observation observation = observe(store, CHUNK, 100).orElseThrow();
+        assertEquals(Optional.of(ConcentrationClassification.HIGHLY_ELEVATED), observation.classification(),
+                "without a fallback every band would be missing and the overlay empty");
+        assertTrue(observation.elevated());
+    }
+
+    @Test
+    void a_server_baseline_always_wins_over_the_fallback() {
+        ClientConcentrationStore store = new ClientConcentrationStore(8);
+        store.setFallbackBaseline(500.0);
+        store.setBaseline(2000.0);
+        store.offer(CHUNK, true, 1500.0);
+
+        assertEquals(2000.0, store.effectiveBaseline());
+        assertEquals(Optional.of(ConcentrationClassification.NORMAL),
+                observe(store, CHUNK, 100).orElseThrow().classification());
+    }
+
+    @Test
+    void an_invalid_fallback_is_rejected() {
+        ClientConcentrationStore store = new ClientConcentrationStore(8);
+        store.setFallbackBaseline(Double.NaN); // accepted: fallback disabled
+        assertTrue(Double.isNaN(store.effectiveBaseline()));
+        try {
+            store.setFallbackBaseline(0.0);
+            throw new AssertionError("a zero fallback must be rejected");
+        } catch (IllegalArgumentException expected) {
+            // expected
+        }
+    }
+
+    @Test
     void restored_history_is_last_known_and_never_overwrites_live_data() {
         ClientConcentrationStore store = newStore();
         ChunkCacheKey remembered = new ChunkCacheKey("sp:world", "minecraft:overworld", 40, 40);

@@ -4,6 +4,28 @@ All notable changes to this project. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses
 semantic versioning with pre-release suffixes.
 
+## [0.1.0-alpha.3] — 2026-10-26
+
+An overlay that never appears because the server could not report a baseline.
+
+### Fixed
+
+- **`baseline.fallback` was documented but never used.** When the server reports
+  an unreadable baseline (`NaN`) the client now classifies against the configured
+  fallback instead of against nothing. Previously every band disappeared, and
+  with them the entire overlay, while the hover line still showed a number - the
+  exact "tooltip works, map stays grey" symptom.
+- The server retries an unreadable baseline every 100 ticks instead of waiting
+  the full 600-tick refresh, so a transient read failure no longer costs 30
+  seconds of missing colours.
+
+### Added
+
+- The resolved baseline is logged once per session (`Tensura baseline for this
+  world: 500.0`, or a warning naming the fallback), and the world-map overlay logs
+  the first chunk it draws and the first chunk it actually paints. Both make
+  "nothing is visible" answerable from a log instead of guesswork.
+
 ## [0.1.0-alpha.2] — 2026-10-25
 
 Last-known concentrations: mapped chunks keep what was last observed there after
