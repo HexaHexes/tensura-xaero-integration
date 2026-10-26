@@ -140,10 +140,13 @@ dimming is part of the manual pass in `docs/TESTING.md` rows 14 and 17.
 
 Depends on: Phase 7 and explicit user go-ahead.
 
-- [ ] Commit in reviewable slices with descriptive subjects.
-- [ ] Push `main` to `origin`.
-- [ ] Manual in-game pass through `docs/TESTING.md` §6.
-- [ ] Report the result, including anything that could not be verified headlessly.
+- [x] Commit in reviewable slices with descriptive subjects.
+- [x] Push `main` to `origin`.
+- [x] CI green on `main` (`junit`, `gametest`, `version-bump`).
+- [x] Alpha release published by `release.yml`:
+      `v0.1.0-alpha.2+gbf0c331`.
+- [ ] Manual in-game pass through `docs/TESTING.md` §6 — the only outstanding item.
 
-The remote `HexaHexes/tensura-xaero-integration` exists and is empty; `origin`
-points at it. Nothing has been committed or pushed yet.
+The remote holds `main` and one tag; the local tree is in sync with it. The alpha
+release is a pre-release with the jar attached, produced by the same workflow that
+will tag later versions.

@@ -110,7 +110,7 @@ For 4, run with `F3` open to confirm the chunk really is unmapped in Xaero, and
 check the client log for subscription packets — an unmapped chunk must not appear
 in any request.
 
-## 7. CI
+## 7. CI and release
 
 `.github/workflows/ci.yml` runs three checks on every pull request:
 
@@ -121,8 +121,17 @@ in any request.
 - **version-bump** — a beta/stable bump must change `gradle.properties` and
   nothing else; an `-alpha` bump may bundle work.
 
-No credentials are needed: every dependency resolves from CurseMaven. CI has not
-been run yet — the first push will be its first execution.
+No credentials are needed: every dependency resolves from CurseMaven.
+
+Recorded runs on `main`:
+
+| Run | Result |
+| --- | --- |
+| `40248933354` | **failed** — every step died on `./gradlew: Permission denied`: the wrapper was committed from a Windows checkout as mode `100644`. Fixed by committing it as `100755`. |
+| `40249002276` | **success** — `junit` (`102 tests, all passing`), `gametest` (5 tests, graded on the log line), `version-bump` (no bump, alpha allowed). |
+
+The release workflow re-asserts both suites before it tags anything, so a release
+cannot be published from a tree whose tests did not run.
 
 ## 8. Reporting rules
 
