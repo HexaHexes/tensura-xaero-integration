@@ -134,6 +134,24 @@ class ClientConcentrationStoreTest {
     }
 
     @Test
+    void a_heartbeat_of_unchanged_values_keeps_a_settled_chunk_live() {
+        ClientConcentrationStore store = newStore();
+        store.offer(CHUNK, true, 600.0);
+        long staleAfter = 600;
+        // The chunk sits at its ceiling and never changes; the server re-confirms
+        // it every 200 ticks. Without those confirms every value would dim.
+        for (int cycle = 0; cycle < 5; cycle++) {
+            for (int i = 0; i < 200; i++) {
+                store.tick();
+            }
+            assertFalse(store.offer(CHUNK, true, 600.0), "an unchanged value needs no repaint");
+            store.expire(staleAfter);
+            assertTrue(observe(store, CHUNK, staleAfter).orElseThrow().live(),
+                    "a confirmed, unchanged value is still current after " + (cycle + 1) * 200 + " ticks");
+        }
+    }
+
+    @Test
     void an_unavailable_answer_keeps_the_last_known_value() {
         ClientConcentrationStore store = newStore();
         store.offer(CHUNK, true, 600.0);

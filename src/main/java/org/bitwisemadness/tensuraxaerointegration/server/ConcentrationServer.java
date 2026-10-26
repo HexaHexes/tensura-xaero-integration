@@ -44,6 +44,10 @@ import org.bitwisemadness.tensuraxaerointegration.tensura.TensuraBridge;
  *   <li><b>Periodic reconciliation.</b> {@link #onServerTick} re-reads a bounded,
  *       rotating slice of each player's subscriptions every cycle, so a change
  *       missed by the tick observer (or a chunk that unloaded) is corrected.</li>
+ *   <li><b>Heartbeat.</b> {@link #onServerTick} also re-confirms chunks whose
+ *       value has not changed within {@code refreshIntervalTicks}. A chunk that
+ *       sits at its ceiling never produces a change, so without the heartbeat the
+ *       client would eventually dim every value as last known.</li>
  * </ol>
  *
  * <p>Only the server thread touches this class, except {@link #get()}.</p>
@@ -57,6 +61,9 @@ public final class ConcentrationServer {
 
     /** Retry delay while Tensura's baseline cannot be read at all. */
     private static final int BASELINE_RETRY_TICKS = 100;
+
+    /** How often the heartbeat sweep looks for chunks that need re-confirming. */
+    private static final int REFRESH_CHECK_INTERVAL_TICKS = 20;
 
     private final Map<UUID, PlayerState> players = new LinkedHashMap<>();
 
@@ -242,6 +249,9 @@ public final class ConcentrationServer {
             if (now % ServerConfig.reconcileIntervalTicks() == 0) {
                 reconcile(player, state, now);
             }
+            if (now % REFRESH_CHECK_INTERVAL_TICKS == 0) {
+                refreshUnchanged(player, state, now);
+            }
             flush(player, state, now);
         }
     }
@@ -265,6 +275,40 @@ public final class ConcentrationServer {
                 continue;
             }
             offerCurrent(level, key, now, state);
+        }
+    }
+
+    /**
+     * Confirms chunks whose value has not changed for a while.
+     *
+     * <p>Most chunks sit at their magicule ceiling and never change, so the
+     * change-gated paths send them exactly once and stop. The client cannot tell
+     * that apart from a server that went silent, and dims the value as last known
+     * after its freshness window. Re-reading and re-sending the same value is an
+     * honest "this is still what the chunk holds" and keeps the colour current.</p>
+     *
+     * <p>Bounded like reconciliation: at most
+     * {@link ServerConfig#reconcileBudgetChunks()} chunks per sweep, and a chunk
+     * is only offered again once its last send is
+     * {@link ServerConfig#refreshIntervalTicks()} old.</p>
+     */
+    private void refreshUnchanged(ServerPlayer player, PlayerState state, int now) {
+        List<ChunkCacheKey> due = state.queue.dueForRefresh(now, ServerConfig.refreshIntervalTicks());
+        if (due.isEmpty()) {
+            return;
+        }
+        ServerLevel level = player.serverLevel();
+        int budget = ServerConfig.reconcileBudgetChunks();
+        int refreshed = 0;
+        for (ChunkCacheKey key : due) {
+            if (refreshed >= budget) {
+                break;
+            }
+            if (!state.subscriptions.contains(key)) {
+                continue;
+            }
+            state.queue.offerRefresh(key, readOrNaN(TensuraBridge.read(level, key.chunkX(), key.chunkZ())));
+            refreshed++;
         }
     }
 

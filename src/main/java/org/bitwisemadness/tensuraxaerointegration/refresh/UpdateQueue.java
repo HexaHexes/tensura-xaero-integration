@@ -20,6 +20,12 @@ import org.bitwisemadness.tensuraxaerointegration.cache.ChunkCacheKey;
  * <p>{@link Double#NaN} is the "no readable value" payload. Two NaNs count as
  * equal, so an already-sent unavailability is not resent every tick.</p>
  *
+ * <p>Deduplication and liveness pull in opposite directions: most chunks sit at
+ * their ceiling and never change, so sending only changes would let every value
+ * go stale on the client within a minute. {@link #offerRefresh} re-queues an
+ * unchanged value after {@link #dueForRefresh} reports it is due, which is what
+ * keeps a real observation counting as current without inventing a value.</p>
+ *
  * <p>Not thread-safe: the coordinator owns one instance per player and only
  * touches it from the server thread.</p>
  */
@@ -55,6 +61,43 @@ public final class UpdateQueue {
         slot.pendingValue = value;
         slot.pending = true;
         return true;
+    }
+
+    /**
+     * Queues a value even though it matches the last one sent.
+     *
+     * <p>Deduplication alone would leave an unchanged chunk silent forever, so
+     * the client could never tell a still-current value from one that stopped
+     * being refreshed. This is the heartbeat that keeps a genuine observation
+     * counting as live; the throttle in {@link #takeReady} still applies.</p>
+     */
+    public void offerRefresh(ChunkCacheKey key, double value) {
+        Slot slot = this.slots.computeIfAbsent(key, ignored -> new Slot());
+        slot.pendingValue = value;
+        slot.pending = true;
+    }
+
+    /**
+     * Chunks whose last send is at least {@code intervalTicks} old, i.e. the ones
+     * a heartbeat has to confirm again.
+     *
+     * <p>A chunk with a value already pending is skipped: it will be sent anyway.</p>
+     */
+    public List<ChunkCacheKey> dueForRefresh(long now, long intervalTicks) {
+        if (intervalTicks <= 0L || this.slots.isEmpty()) {
+            return List.of();
+        }
+        List<ChunkCacheKey> due = new ArrayList<>();
+        for (Map.Entry<ChunkCacheKey, Slot> entry : this.slots.entrySet()) {
+            Slot slot = entry.getValue();
+            if (!slot.everSent || slot.pending) {
+                continue;
+            }
+            if (now - slot.lastSentTick >= intervalTicks) {
+                due.add(entry.getKey());
+            }
+        }
+        return due;
     }
 
     /** Whether the chunk has a value waiting to be sent. */

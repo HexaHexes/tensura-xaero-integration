@@ -144,6 +144,7 @@ the missing chunks simply never arrive.
 | `reconcileIntervalTicks` | `100` | How often the periodic sweep runs. |
 | `reconcileBudgetChunksPerPlayer` | `256` | Most subscribed chunks re-read per player per sweep. The cursor rotates, so every subscription is visited over successive sweeps. |
 | `minUpdateIntervalTicks` | `20` | Minimum ticks between two sends for the same chunk. A change inside the window stays pending — it is delayed, never dropped. |
+| `refreshIntervalTicks` | `200` | How often a subscribed chunk whose value has **not** changed is confirmed again. A chunk parked at its magicule ceiling never changes, so without this heartbeat it would be sent once and then count as last known on the client. Keep it well below the client's `staleAfterTicks` (600). |
 | `maxUpdatesPerPacket` | `256` | Chunk updates batched into one packet. |
 
 ---
@@ -166,7 +167,7 @@ the missing chunks simply never arrive.
 | Quieter map | lower the opacities, raise `slightlyElevatedMultiplier` |
 | See subtler elevations | lower `slightlyElevatedMultiplier` (but `> 1.0`) |
 | Cheaper on a busy server | raise `reconcileIntervalTicks`, lower `reconcileBudgetChunksPerPlayer` |
-| Fewer packets | raise `minUpdateIntervalTicks`, raise `maxUpdatesPerPacket` |
+| Fewer packets | raise `minUpdateIntervalTicks`, raise `refreshIntervalTicks`, raise `maxUpdatesPerPacket` |
 | Larger overlay area | raise client `radiusChunks` **and** server `maxSubscribeRadiusChunks` |
 | Hide the feature on a server | `sync.enabled = false` |
 | Remember less history | lower `persistence.maxEntriesPerWorld` |

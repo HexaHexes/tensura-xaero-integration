@@ -4,6 +4,23 @@ All notable changes to this project. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses
 semantic versioning with pre-release suffixes.
 
+## [0.1.0-alpha.4] — 2026-10-26
+
+Settled chunks staying bright: an unchanged concentration is confirmed again
+instead of going stale and dimming to "last known".
+
+### Fixed
+
+- **Live values dimmed after 30 seconds even in loaded chunks.** The server only
+  sent a chunk when its value *changed*, and a chunk parked at its magicule
+  ceiling never changes - so it was sent once, on subscription, and never again.
+  The client then correctly treated it as no longer refreshed, dimmed it and
+  labelled it last known. The server now re-confirms an unchanged value every
+  `refreshIntervalTicks` (200 ticks / 10 s by default), which keeps the overlay
+  at full strength for as long as the chunk is honestly answerable. Only
+  subscribed, currently loaded chunks are re-read, and the sweep is bounded like
+  reconciliation.
+
 ## [0.1.0-alpha.3] — 2026-10-26
 
 An overlay that never appears because the server could not report a baseline.
