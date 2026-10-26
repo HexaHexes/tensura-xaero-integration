@@ -8,7 +8,6 @@ import org.bitwisemadness.tensuraxaerointegration.TensuraXaeroIntegration;
 import org.bitwisemadness.tensuraxaerointegration.cache.RegionKey;
 import org.bitwisemadness.tensuraxaerointegration.client.ClientConcentration;
 import org.bitwisemadness.tensuraxaerointegration.client.ClientConcentrationStore;
-import org.bitwisemadness.tensuraxaerointegration.client.ClientConcentrationStore.Observation;
 import org.bitwisemadness.tensuraxaerointegration.client.HoverText;
 import org.bitwisemadness.tensuraxaerointegration.concentration.ConcentrationClassification;
 import org.bitwisemadness.tensuraxaerointegration.config.ClientConfig;
