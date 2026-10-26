@@ -4,7 +4,30 @@ All notable changes to this project. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses
 semantic versioning with pre-release suffixes.
 
-## [0.1.0-alpha.6] — 2026-10-26
+## [0.1.0-alpha.7] — 2026-10-26
+
+Tier entries for the dimensions the Tensura RPG pack actually has.
+
+### Added
+
+- Datapack entries for `iceandfire:dread_land` (`+50000` level modifier),
+  `mysticism:elemental_realm` (`+100000`, tight `1.005`–`1.03` ladder for its seven
+  biomes), `mysticism:kamui_dimension`, `irons_spellbooks:pocket_dimension` and
+  `tensura_all_the_adventure:reincarnation_trial`.
+- Enumerated from the pack's own jars, not guessed: those five plus the three
+  vanilla dimensions and the three Tensura ones are the complete set their
+  `data/<ns>/dimension` files define.
+
+### Fixed
+
+- `tensura:labyrinth` no longer carries a tight ladder it cannot use: the dimension
+  is a flat void world, so every chunk sits at its normal and the default ladder is
+  correct. Its magic engines subtract magicule, which is below normal and therefore
+  unpainted either way.
+
+### Changed
+
+- Version bump only otherwise: no protocol or schema change from 0.1.0-alpha.6.
 
 Per-dimension tiers from a datapack, decided by the server.
 

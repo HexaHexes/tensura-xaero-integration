@@ -176,8 +176,19 @@ is skipped; the rest still applies.
 | `minecraft:the_nether` | `600` | `baseMagicule × 1.2`; biomes add `1500`–`4500`. |
 | `minecraft:the_end` | `750` | `baseMagicule × 1.5`; end biomes add `4500`. |
 | `tensura:hell` | `100500` | `+100000` level modifier; underworld biomes add `500`–`3500`, so its ladder is tight (`1.005`–`1.03`). |
-| `tensura:labyrinth` | `30000` | `+29500` level modifier; ladder `1.25`–`1.95` spans the biome additives. |
+| `tensura:labyrinth` | `30000` | `+29500` level modifier, flat void world: uniform, so the default ladder is right. Magic engines subtract from it, which is below normal and therefore unpainted. |
 | `tensura:boss_area` | `500` | Flat void arena, no modifiers. |
+| `iceandfire:dread_land` | `50500` | `+50000` from `tensura_iaf`; both dread biomes contribute nothing, so uniform. |
+| `mysticism:elemental_realm` | `100500` | `+100000` level modifier; its seven biomes add `500`–`3500`, so the same tight ladder as hell. |
+| `mysticism:kamui_dimension` | `500` | Single fixed biome with no magicule modifier. |
+| `irons_spellbooks:pocket_dimension` | `500` | Flat water pocket, no modifiers. |
+| `tensura_all_the_adventure:reincarnation_trial` | `500` | Flat void trial, no modifiers. |
+
+A uniform dimension paints nothing — every chunk sits at its normal, which is the
+honest reading. Where a dimension *does* vary (`dark_forest`, `deep_dark`, the
+nether biomes, the elemental realm) the ladder is what makes the difference
+visible; a pack that wants a flat dimension to show something lower its baseline
+there.
 
 These assume Tensura's shipped `baseMagicule` of `500`. If a pack changes it, the
 nether and end figures scale with it and the hell/labyrinth ones need re-tuning —

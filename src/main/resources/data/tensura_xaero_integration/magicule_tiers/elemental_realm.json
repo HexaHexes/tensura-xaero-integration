@@ -1,0 +1,12 @@
+{
+  "dimensions": [
+    "mysticism:elemental_realm"
+  ],
+  "baseline": 100500.0,
+  "bands": {
+    "slightly_elevated": 1.005,
+    "moderately_elevated": 1.01,
+    "highly_elevated": 1.02,
+    "exceptionally_elevated": 1.03
+  }
+}

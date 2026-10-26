@@ -2,11 +2,5 @@
   "dimensions": [
     "tensura:labyrinth"
   ],
-  "baseline": 30000.0,
-  "bands": {
-    "slightly_elevated": 1.25,
-    "moderately_elevated": 1.5,
-    "highly_elevated": 1.8,
-    "exceptionally_elevated": 1.95
-  }
+  "baseline": 30000.0
 }
