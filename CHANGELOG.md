@@ -32,6 +32,21 @@ separately below.
   repaint rewrote eviction order under the lock the tick thread writes with. Recency
   now follows writes: the chunk still being confirmed keeps its slot, and what is on
   screen no longer decides what survives.
+- **A tile rebuild no longer builds an observation to pick a colour.** `getColors`
+  ran for every visible chunk on each map tile rebuild and went through
+  `ClientConcentrationStore.observe`, paying an `Optional` for the entry, an
+  `Observation` record and another `Optional` for the band - to colour a chunk, which
+  needs only the band and whether the value is still current. `paintState` packs those
+  two into one `int` from a single locked lookup (`NO_PAINT` when the chunk holds
+  nothing), decoded with `bandOf`/`liveOf`; `observe` remains for the hover line, which
+  does need the number.
+- **The overlay colour lookup and its array allocate nothing.**
+  `OverlayPalette.xaeroColorFor` built an `Optional` for the tier and a mapped
+  `Optional` for the boxed colour; it now switches straight to the style. `getColors`
+  also fills a per-thread `int[5]` instead of allocating one per chunk - safe because
+  Xaero's `getChunkHighlitColor` copies those five entries into its own result store
+  before returning, and per thread because the map's render and writer threads both
+  ask.
 - **The hover line is built once, not once per frame.** `HoverText.describe` runs on
   every map frame for the block under the cursor, and each call ran a `String.format`
   for the number plus two `Component.translatable` nodes - the same three results

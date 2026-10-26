@@ -192,6 +192,18 @@ public final class ConcentrationCache {
     }
 
     /**
+     * The stored entry for a chunk, or {@code null} when there is none.
+     *
+     * <p>The allocation-free form of {@link #entry}: a map tile rebuild asks about
+     * every visible chunk and needs only the band and the liveness, so it must not
+     * pay for an {@code Optional} to find out that there is nothing there. Never
+     * hand this entry out for mutation.</p>
+     */
+    public synchronized ConcentrationEntry entryOrNull(ChunkCacheKey key) {
+        return this.entries.get(key);
+    }
+
+    /**
      * Whether anything displayable is held for the chunk, current or remembered.
      *
      * <p>The version a highlighter needs when it only has to answer "paint or

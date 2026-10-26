@@ -61,15 +61,27 @@ public record OverlayPalette(TierStyle slightlyElevated,
 
     /** The style for a band; {@code NORMAL} (and {@code null}) has no style. */
     public Optional<TierStyle> tierFor(ConcentrationClassification classification) {
+        return Optional.ofNullable(tierOrNull(classification));
+    }
+
+    /**
+     * The style for a band, or {@code null} when it is not painted.
+     *
+     * <p>The allocation-free form of {@link #tierFor}, for the map highlighters:
+     * they ask for a colour per visible chunk on every tile rebuild, and an
+     * {@code Optional} per chunk is the whole cost of a lookup against four
+     * constants.</p>
+     */
+    private TierStyle tierOrNull(ConcentrationClassification classification) {
         if (classification == null) {
-            return Optional.empty();
+            return null;
         }
         return switch (classification) {
-            case NORMAL -> Optional.empty();
-            case SLIGHTLY_ELEVATED -> Optional.of(this.slightlyElevated);
-            case MODERATELY_ELEVATED -> Optional.of(this.moderatelyElevated);
-            case HIGHLY_ELEVATED -> Optional.of(this.highlyElevated);
-            case EXCEPTIONALLY_ELEVATED -> Optional.of(this.exceptionallyElevated);
+            case NORMAL -> null;
+            case SLIGHTLY_ELEVATED -> this.slightlyElevated;
+            case MODERATELY_ELEVATED -> this.moderatelyElevated;
+            case HIGHLY_ELEVATED -> this.highlyElevated;
+            case EXCEPTIONALLY_ELEVATED -> this.exceptionallyElevated;
         };
     }
 
@@ -99,9 +111,10 @@ public record OverlayPalette(TierStyle slightlyElevated,
      * the scale is clamped to {@code 0..1} so this can never brighten a band.</p>
      */
     public int xaeroColorFor(ConcentrationClassification classification, double opacityScale) {
-        return tierFor(classification)
-                .map(tier -> xaeroColor(tier.rgb(), tier.opacity() * clamp(opacityScale)))
-                .orElse(0);
+        // No Optional and no boxing: this runs per visible chunk on every tile
+        // rebuild, so a lookup against four styles must stay allocation-free.
+        TierStyle tier = tierOrNull(classification);
+        return tier == null ? 0 : xaeroColor(tier.rgb(), tier.opacity() * clamp(opacityScale));
     }
 
     /** Packs 0xRRGGBB + opacity into Xaero's {@code BBGGRRAA} int layout. */

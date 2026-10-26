@@ -1,12 +1,10 @@
 package org.bitwisemadness.tensuraxaerointegration.client.overlay;
 
-import java.util.Optional;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.level.Level;
 import org.bitwisemadness.tensuraxaerointegration.cache.RegionKey;
 import org.bitwisemadness.tensuraxaerointegration.client.ClientConcentration;
 import org.bitwisemadness.tensuraxaerointegration.client.ClientConcentrationStore;
-import org.bitwisemadness.tensuraxaerointegration.client.ClientConcentrationStore.Observation;
 import org.bitwisemadness.tensuraxaerointegration.config.ClientConfig;
 import xaero.common.minimap.highlight.ChunkHighlighter;
 import xaero.hud.minimap.info.render.compile.InfoDisplayCompiler;
@@ -26,6 +24,16 @@ import xaero.hud.minimap.info.render.compile.InfoDisplayCompiler;
 public final class MinimapConcentrationOverlay extends ChunkHighlighter {
 
     public static final MinimapConcentrationOverlay INSTANCE = new MinimapConcentrationOverlay();
+
+    /**
+     * The five colours one chunk needs, reused per thread.
+     *
+     * <p>Xaero's {@code getChunkHighlitColor} reads all five entries into locals
+     * and copies them into its own result store before returning, so this array
+     * never outlives the call. Per thread because the minimap's render and writer
+     * threads both ask, and one array shared between them would race.</p>
+     */
+    private static final ThreadLocal<int[]> COLORS = ThreadLocal.withInitial(() -> new int[5]);
 
     private MinimapConcentrationOverlay() {
         super(false);
@@ -53,15 +61,26 @@ public final class MinimapConcentrationOverlay extends ChunkHighlighter {
 
     @Override
     protected int[] getColors(ResourceKey<Level> dimension, int chunkX, int chunkZ) {
-        Optional<Observation> observation = observation(dimension, chunkX, chunkZ);
-        if (observation.isEmpty()) {
+        if (!ClientConfig.minimapOverlayEnabled()) {
             return null;
         }
-        Observation value = observation.get();
-        double scale = value.live() ? 1.0 : ClientConfig.historicalOpacityScale();
-        int colour = ClientConfig.palette(ClientConcentration.get().store().serverPalette())
-                .xaeroColorFor(value.classification().orElse(null), scale);
-        return new int[] {colour, colour, colour, colour, colour};
+        // One packed read: painting needs the band and the liveness, not the number.
+        ClientConcentrationStore store = ClientConcentration.get().store();
+        int state = store.paintState(
+                ClientConcentration.get().key(dimension, chunkX, chunkZ), store.staleAfterMillis());
+        if (state == ClientConcentrationStore.NO_PAINT) {
+            return null;
+        }
+        double scale = ClientConcentrationStore.liveOf(state) ? 1.0 : ClientConfig.historicalOpacityScale();
+        int colour = ClientConfig.palette(store.serverPalette())
+                .xaeroColorFor(ClientConcentrationStore.bandOf(state), scale);
+        int[] colours = COLORS.get();
+        colours[0] = colour;
+        colours[1] = colour;
+        colours[2] = colour;
+        colours[3] = colour;
+        colours[4] = colour;
+        return colours;
     }
 
     @Override
@@ -76,13 +95,4 @@ public final class MinimapConcentrationOverlay extends ChunkHighlighter {
         // No minimap readout is part of this mod's scope.
     }
 
-    private static Optional<Observation> observation(ResourceKey<Level> dimension, int chunkX, int chunkZ) {
-        if (!ClientConfig.minimapOverlayEnabled()) {
-            return Optional.empty();
-        }
-        ClientConcentrationStore store = ClientConcentration.get().store();
-        return store.observe(
-                ClientConcentration.get().key(dimension, chunkX, chunkZ),
-                store.staleAfterMillis());
-    }
 }

@@ -271,9 +271,17 @@ and colour, so the two maps can never disagree:
 - `chunkIsHighlit` — true only for a chunk present in the store, mapped, fresh,
   and above the baseline band; this gate also controls whether the tooltip path
   is consulted at all.
-- `getChunkHighlitColor` — 256 ARGB entries in Xaero's channel order
+- `getColors` — the five colours one chunk needs, in Xaero's channel order
   (`blue << 24 | green << 16 | red << 8 | alpha`), with a zero-alpha colour for
-  chunks that are highlit only so their tooltip can show.
+  chunks that are highlit only so their tooltip can show. Xaero's
+  `getChunkHighlitColor` reads the five entries into locals and copies them into
+  its own 256-entry result store before returning, so each overlay fills a
+  per-thread `int[5]` rather than allocating one per chunk (per thread because the
+  map's render and writer threads both ask, and one array between them would race).
+- the colour comes from `ClientConcentrationStore.paintState` — one locked lookup
+  that packs the band and the liveness into an `int`, with `NO_PAINT` when the
+  chunk holds nothing. A tile rebuild therefore never builds an `Observation`;
+  `observe` stays for the hover line, which does need the number.
 - `calculateRegionHash` / `regionHasHighlights` — derived from the store's
   per-region version, so a region repaints exactly when one of its values changed.
 - `getBlockHighlightSubtleTooltip` / `getBlockHighlightBluntTooltip` (world map

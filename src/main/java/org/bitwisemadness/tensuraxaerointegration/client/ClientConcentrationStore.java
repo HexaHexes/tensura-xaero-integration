@@ -308,6 +308,49 @@ public final class ClientConcentrationStore {
         return Optional.of(new Observation(value.value(), classification, live));
     }
 
+    /**
+     * A paint state that means "nothing to draw for this chunk".
+     *
+     * @see #paintState(ChunkCacheKey, long)
+     */
+    public static final int NO_PAINT = -1;
+
+    /**
+     * The band and liveness a map needs to colour a chunk, without building an
+     * {@link Observation}.
+     *
+     * <p>This is the read the two Xaero highlighters make for every visible chunk
+     * each time they rebuild a map tile, and it does not need the number: the
+     * colour comes from the band and the opacity from the liveness. Going through
+     * {@link #observe} cost an {@code Optional} for the entry, a record and an
+     * {@code Optional} for the band per chunk. The two small pieces are packed
+     * into one {@code int} so the whole read is one map lookup and one lock, and
+     * the answer is decoded with {@link #bandOf} / {@link #liveOf}.</p>
+     *
+     * @return {@link #NO_PAINT}, or {@code (bandCode + 1) << 1 | (live ? 1 : 0)};
+     *         the offset keeps a chunk with no band ({@code -1}) distinct from
+     *         {@link #NO_PAINT}
+     */
+    public int paintState(ChunkCacheKey key, long windowMillis) {
+        ConcentrationEntry entry = this.cache.entryOrNull(key);
+        if (entry == null || !entry.available()) {
+            return NO_PAINT;
+        }
+        // A band code this client does not know is drawn uncoloured, as in observe().
+        int bandCode = ConcentrationClassification.byCode(entry.band()) == null ? -1 : entry.band();
+        return (bandCode + 1) << 1 | (entry.fresh(now(), windowMillis) ? 1 : 0);
+    }
+
+    /** The band in a paint state, or {@code null} when the chunk has none. */
+    public static ConcentrationClassification bandOf(int paintState) {
+        return ConcentrationClassification.byCode((paintState >> 1) - 1);
+    }
+
+    /** Whether a paint state is live rather than last known. */
+    public static boolean liveOf(int paintState) {
+        return (paintState & 1) != 0;
+    }
+
     /** Every available value held, live or last-known; the persistence snapshot. */
     public List<StoredValue> storedValues() {
         List<StoredValue> values = new ArrayList<>();

@@ -1,7 +1,6 @@
 package org.bitwisemadness.tensuraxaerointegration.client.overlay;
 
 import java.util.List;
-import java.util.Optional;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.level.Level;
@@ -11,6 +10,7 @@ import org.bitwisemadness.tensuraxaerointegration.client.ClientConcentration;
 import org.bitwisemadness.tensuraxaerointegration.client.ClientConcentrationStore;
 import org.bitwisemadness.tensuraxaerointegration.client.ClientConcentrationStore.Observation;
 import org.bitwisemadness.tensuraxaerointegration.client.HoverText;
+import org.bitwisemadness.tensuraxaerointegration.concentration.ConcentrationClassification;
 import org.bitwisemadness.tensuraxaerointegration.config.ClientConfig;
 import xaero.map.highlight.ChunkHighlighter;
 
@@ -43,6 +43,16 @@ public final class WorldMapConcentrationOverlay extends ChunkHighlighter {
     private static volatile boolean loggedHighlit;
     private static volatile boolean loggedPainted;
 
+    /**
+     * The five colours one chunk needs, reused per thread.
+     *
+     * <p>Xaero's {@code getChunkHighlitColor} reads all five entries into locals
+     * and copies them into its own result store before returning, so this array
+     * never outlives the call. Per thread because the map's render and writer
+     * threads both ask, and one array shared between them would race.</p>
+     */
+    private static final ThreadLocal<int[]> COLORS = ThreadLocal.withInitial(() -> new int[5]);
+
     private WorldMapConcentrationOverlay() {
         super(false);
     }
@@ -72,29 +82,39 @@ public final class WorldMapConcentrationOverlay extends ChunkHighlighter {
         if (!ClientConfig.worldMapOverlayEnabled()) {
             return null;
         }
-        Optional<Observation> observation = observation(dimension, chunkX, chunkZ);
-        if (observation.isEmpty()) {
+        // One packed read: the number is not needed to paint, only the band and
+        // whether the value is still current.
+        ClientConcentrationStore store = ClientConcentration.get().store();
+        int state = store.paintState(
+                ClientConcentration.get().key(dimension, chunkX, chunkZ), store.staleAfterMillis());
+        if (state == ClientConcentrationStore.NO_PAINT) {
             return null;
         }
-        Observation value = observation.get();
+        ConcentrationClassification band = ClientConcentrationStore.bandOf(state);
+        boolean live = ClientConcentrationStore.liveOf(state);
         if (!loggedHighlit) {
             loggedHighlit = true;
             TensuraXaeroIntegration.LOGGER.info(
-                    "World map is drawing concentration data (first chunk {},{}: value {} live={} band={})",
-                    chunkX, chunkZ, value.value(), value.live(), value.classification());
+                    "World map is drawing concentration data (first chunk {},{}: live={} band={})",
+                    chunkX, chunkZ, live, band);
         }
         // A value that is no longer refreshed is drawn dimmer, never as bright as
         // a current one; a normal chunk stays fully transparent either way.
-        double scale = value.live() ? 1.0 : ClientConfig.historicalOpacityScale();
-        int colour = ClientConfig.palette(ClientConcentration.get().store().serverPalette())
-                .xaeroColorFor(value.classification().orElse(null), scale);
+        double scale = live ? 1.0 : ClientConfig.historicalOpacityScale();
+        int colour = ClientConfig.palette(store.serverPalette()).xaeroColorFor(band, scale);
         if (!loggedPainted && (colour & 0xFF) > 0) {
             loggedPainted = true;
             TensuraXaeroIntegration.LOGGER.info(
                     "World map overlay is painting (first painted chunk {},{}: band={} alpha={})",
-                    chunkX, chunkZ, value.classification(), colour & 0xFF);
+                    chunkX, chunkZ, band, colour & 0xFF);
         }
-        return new int[] {colour, colour, colour, colour, colour};
+        int[] colours = COLORS.get();
+        colours[0] = colour;
+        colours[1] = colour;
+        colours[2] = colour;
+        colours[3] = colour;
+        colours[4] = colour;
+        return colours;
     }
 
     @Override
@@ -122,13 +142,6 @@ public final class WorldMapConcentrationOverlay extends ChunkHighlighter {
     public void addMinimapBlockHighlightTooltips(List<Component> tooltips, ResourceKey<Level> dimension,
             int blockX, int blockZ, int width) {
         // The minimap has its own highlighter; nothing to add here.
-    }
-
-    private static Optional<Observation> observation(ResourceKey<Level> dimension, int chunkX, int chunkZ) {
-        ClientConcentrationStore store = ClientConcentration.get().store();
-        return store.observe(
-                ClientConcentration.get().key(dimension, chunkX, chunkZ),
-                store.staleAfterMillis());
     }
 
     private static RegionKey regionKey(ResourceKey<Level> dimension, int regionX, int regionZ) {
