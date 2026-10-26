@@ -52,8 +52,8 @@ public final class ConcentrationCache {
      *
      * @return true when the stored value or its availability actually changed
      */
-    public synchronized boolean put(ChunkCacheKey key, double value, int band, long tick) {
-        return write(key, ConcentrationEntry.of(value, band, tick));
+    public synchronized boolean put(ChunkCacheKey key, double value, int band, long stampMillis) {
+        return write(key, ConcentrationEntry.of(value, band, stampMillis));
     }
 
     /**
@@ -61,8 +61,8 @@ public final class ConcentrationCache {
      *
      * @return true when the stored entry changed
      */
-    public synchronized boolean markUnavailable(ChunkCacheKey key, long tick) {
-        return write(key, ConcentrationEntry.unavailable(tick));
+    public synchronized boolean markUnavailable(ChunkCacheKey key, long stampMillis) {
+        return write(key, ConcentrationEntry.unavailable(stampMillis));
     }
 
     /**
@@ -122,10 +122,10 @@ public final class ConcentrationCache {
         return OptionalDouble.of(entry.value());
     }
 
-    /** The stored value if it is available and no older than {@code staleAfterTicks}. */
-    public synchronized OptionalDouble freshValue(ChunkCacheKey key, long now, long staleAfterTicks) {
+    /** The stored value if it is available and no older than {@code windowMillis}. */
+    public synchronized OptionalDouble freshValue(ChunkCacheKey key, long nowMillis, long windowMillis) {
         ConcentrationEntry entry = this.entries.get(key);
-        if (entry == null || !entry.available() || !entry.fresh(now, staleAfterTicks)) {
+        if (entry == null || !entry.available() || !entry.fresh(nowMillis, windowMillis)) {
             return OptionalDouble.empty();
         }
         return OptionalDouble.of(entry.value());

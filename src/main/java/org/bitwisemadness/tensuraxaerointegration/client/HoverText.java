@@ -32,7 +32,7 @@ public final class HoverText {
         String token = ClientConcentration.get().worldToken();
         ChunkCacheKey key = new ChunkCacheKey(token.isBlank() ? "unknown" : token, dimensionId, chunkX, chunkZ);
 
-        Optional<Observation> observation = store.observe(key, store.staleAfterTicks());
+        Optional<Observation> observation = store.observe(key, store.staleAfterMillis());
         if (observation.isEmpty()) {
             return null;
         }

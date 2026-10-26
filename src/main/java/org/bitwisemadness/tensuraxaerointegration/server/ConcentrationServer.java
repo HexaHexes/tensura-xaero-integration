@@ -78,6 +78,12 @@ public final class ConcentrationServer {
     /** Tensura's baseline as last read, NaN when unreadable; a tier fallback. */
     private double baseline = Double.NaN;
 
+    /** When the last cadence sample was taken, in {@link System#nanoTime()}. */
+    private long lastCadenceSampleNanos;
+
+    /** Real time the last 20 ticks took, extrapolated to one refresh interval. */
+    private long refreshPromiseMillis;
+
     private ConcentrationServer() {
     }
 
@@ -228,6 +234,9 @@ public final class ConcentrationServer {
             return;
         }
         int now = server.getTickCount();
+        if (now % REFRESH_CHECK_INTERVAL_TICKS == 0) {
+            sampleCadence();
+        }
         boolean enabled = ServerConfig.syncEnabled();
         boolean sendServerInfo = now - this.lastBaselineTick >= SERVER_INFO_REFRESH_INTERVAL_TICKS;
         if (sendServerInfo) {
@@ -255,7 +264,8 @@ public final class ConcentrationServer {
                 // The heartbeat cadence travels with the baseline: the client derives
                 // its freshness window from it, so the two cannot drift apart.
                 PacketDistributor.sendToPlayer(player, new ServerInfoPayload(baseline,
-                        ServerConfig.refreshIntervalTicks(), MagiculeTiers.get().palette()));
+                        ServerConfig.refreshIntervalTicks(), refreshPromiseMillis(),
+                        MagiculeTiers.get().palette()));
                 state.baselinePending = false;
             }
             pruneIneligible(player, state);
@@ -289,6 +299,39 @@ public final class ConcentrationServer {
             }
             offerCurrent(level, key, now, state);
         }
+    }
+
+    /**
+     * Measures how long the server really needs for one refresh interval.
+     *
+     * <p>The client's freshness window used to be a tick count, which assumed the
+     * server's ticks and the client's ticks advanced together. On a server that
+     * reports "Can't keep up" they do not: 200 server ticks can take far longer
+     * than 200 client ticks, so a value that was still being confirmed on
+     * schedule counted as stale in between. The promise is therefore measured, not
+     * assumed, and expressed in milliseconds.</p>
+     */
+    private void sampleCadence() {
+        long nanos = System.nanoTime();
+        if (this.lastCadenceSampleNanos != 0L) {
+            double elapsedMs = (nanos - this.lastCadenceSampleNanos) / 1_000_000.0;
+            // A stall, or a paused singleplayer game, is not the steady state; keep
+            // the previous estimate rather than promising a window that swallows it.
+            if (elapsedMs > 0.0 && elapsedMs < 5_000.0) {
+                double perTick = elapsedMs / REFRESH_CHECK_INTERVAL_TICKS;
+                this.refreshPromiseMillis = Math.max(1L, Math.round(perTick * ServerConfig.refreshIntervalTicks()));
+            }
+        }
+        this.lastCadenceSampleNanos = nanos;
+    }
+
+    /**
+     * How long a client should trust a value before asking for another one: the
+     * measured cadence, never faster than the nominal 50 ms per tick.
+     */
+    private long refreshPromiseMillis() {
+        long nominal = ServerConfig.refreshIntervalTicks() * 50L;
+        return this.refreshPromiseMillis > 0L ? Math.max(nominal, this.refreshPromiseMillis) : nominal;
     }
 
     /**

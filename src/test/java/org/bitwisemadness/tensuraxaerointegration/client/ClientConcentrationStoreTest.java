@@ -27,12 +27,19 @@ class ClientConcentrationStoreTest {
     private static final int HIGHLY = ConcentrationClassification.HIGHLY_ELEVATED.code();
     private static final int UNCLASSIFIED = -1;
 
+    /** Wall clock the store measures freshness against, in ms. */
+    private long clock = 1_000_000L;
+
     private ClientConcentrationStore newStore() {
-        return new ClientConcentrationStore(64);
+        return new ClientConcentrationStore(64, () -> this.clock);
     }
 
-    private static Optional<Observation> observe(ClientConcentrationStore store, ChunkCacheKey key, long stale) {
-        return store.observe(key, stale);
+    private void advance(long millis) {
+        this.clock += millis;
+    }
+
+    private static Optional<Observation> observe(ClientConcentrationStore store, ChunkCacheKey key, long window) {
+        return store.observe(key, window);
     }
 
     @Test
@@ -105,7 +112,7 @@ class ClientConcentrationStoreTest {
         ClientConcentrationStore store = newStore();
         store.offer(CHUNK, true, 600.0, SLIGHTLY);
         store.drainDirtyRegions();
-        store.tick();
+        advance(50);
         assertFalse(store.offer(CHUNK, true, 600.0, SLIGHTLY));
         assertTrue(store.drainDirtyRegions().isEmpty());
     }
@@ -116,17 +123,15 @@ class ClientConcentrationStoreTest {
         store.offer(CHUNK, true, 600.0, SLIGHTLY);
         store.drainDirtyRegions();
 
-        for (int i = 0; i < 30; i++) {
-            store.tick();
-        }
-        store.expire(10);
-        Observation observation = observe(store, CHUNK, 10).orElseThrow();
+        advance(5_000);
+        store.expire(1_000);
+        Observation observation = observe(store, CHUNK, 1_000).orElseThrow();
         assertEquals(600.0, observation.value(), "the observation itself is kept");
         assertFalse(observation.live(), "but it is no longer current");
         assertEquals(Set.of(REGION), store.drainDirtyRegions(), "the dim colour must be painted");
 
         // Expiring again is a no-op: one repaint, not one per sweep.
-        store.expire(10);
+        store.expire(1_000);
         assertTrue(store.drainDirtyRegions().isEmpty());
     }
 
@@ -134,14 +139,12 @@ class ClientConcentrationStoreTest {
     void a_refresh_after_demotion_makes_the_value_live_again() {
         ClientConcentrationStore store = newStore();
         store.offer(CHUNK, true, 600.0, SLIGHTLY);
-        for (int i = 0; i < 30; i++) {
-            store.tick();
-        }
-        store.expire(10);
+        advance(5_000);
+        store.expire(1_000);
         store.drainDirtyRegions();
 
         assertTrue(store.offer(CHUNK, true, 600.0, SLIGHTLY), "going live again is a visible change");
-        assertTrue(observe(store, CHUNK, 10).orElseThrow().live());
+        assertTrue(observe(store, CHUNK, 1_000).orElseThrow().live());
         assertEquals(Set.of(REGION), store.drainDirtyRegions());
     }
 
@@ -149,53 +152,49 @@ class ClientConcentrationStoreTest {
     void a_heartbeat_of_unchanged_values_keeps_a_settled_chunk_live() {
         ClientConcentrationStore store = newStore();
         store.offer(CHUNK, true, 600.0, SLIGHTLY);
-        long staleAfter = store.staleAfterTicks();
-        // The chunk sits at its ceiling and never changes; the server re-confirms
-        // it every interval. Without those confirms every value would dim.
+        long window = store.staleAfterMillis();
+        // The chunk sits at its ceiling and never changes; the server re-confirms it
+        // once per interval. Without those confirms every value would dim.
         for (int cycle = 0; cycle < 5; cycle++) {
-            for (int i = 0; i < store.serverRefreshIntervalTicks(); i++) {
-                store.tick();
-            }
+            advance(store.serverRefreshMillis());
             assertFalse(store.offer(CHUNK, true, 600.0, SLIGHTLY), "an unchanged value needs no repaint");
-            store.expire(staleAfter);
-            assertTrue(observe(store, CHUNK, staleAfter).orElseThrow().live(),
+            store.expire(window);
+            assertTrue(observe(store, CHUNK, window).orElseThrow().live(),
                     "a confirmed, unchanged value is still current after " + (cycle + 1) + " intervals");
         }
     }
 
     @Test
-    void the_freshness_window_follows_the_server_refresh_interval() {
+    void the_freshness_window_is_three_server_confirmations() {
         ClientConcentrationStore store = newStore();
-        assertEquals(2L * ClientConcentrationStore.DEFAULT_SERVER_REFRESH_INTERVAL_TICKS, store.staleAfterTicks(),
-                "the shipped cadence is assumed until the server announces its own");
+        assertEquals(ClientConcentrationStore.DEFAULT_SERVER_REFRESH_MILLIS * 3, store.staleAfterMillis(),
+                "the shipped 200-tick cadence is assumed until the server announces its own");
 
-        store.setServerRefreshInterval(1200);
-        assertEquals(2400L, store.staleAfterTicks(), "a slow server buys its values a longer window");
+        store.setServerRefreshInterval(200, 30_000);
+        assertEquals(90_000, store.staleAfterMillis(), "a server that needs 30 s per beat gets a 90 s window");
+        assertEquals(30_000, store.serverRefreshMillis());
+        assertEquals(200, store.serverRefreshIntervalTicks());
 
-        store.setServerRefreshInterval(20);
-        assertEquals(ClientConcentrationStore.MIN_STALE_TICKS, store.staleAfterTicks(),
+        store.setServerRefreshInterval(20, 1_000);
+        assertEquals(ClientConcentrationStore.MIN_STALE_MILLIS, store.staleAfterMillis(),
                 "a fast server must not make values flicker between live and last known");
     }
 
     @Test
-    void a_slow_server_no_longer_dims_a_value_the_old_fixed_window_would_have_expired() {
+    void a_stalled_server_no_longer_dims_a_value_it_is_still_confirming() {
         ClientConcentrationStore store = newStore();
-        store.setServerRefreshInterval(1200);
+        store.setServerRefreshInterval(200, 10_000); // nominal cadence
         store.offer(CHUNK, true, 600.0, SLIGHTLY);
+        long window = store.staleAfterMillis(); // 30 s
 
-        for (int i = 0; i < 1000; i++) {
-            store.tick();
-        }
-        store.expire(store.staleAfterTicks());
-        assertTrue(observe(store, CHUNK, store.staleAfterTicks()).orElseThrow().live(),
-                "1000 ticks is inside this server's 2400-tick window");
+        advance(25_000); // a 25 s stall between two confirms
+        assertTrue(observe(store, CHUNK, window).orElseThrow().live(),
+                "three beats of slack absorb a multi-second stall");
 
-        for (int i = 0; i < 1500; i++) {
-            store.tick();
-        }
-        store.expire(store.staleAfterTicks());
-        assertFalse(observe(store, CHUNK, store.staleAfterTicks()).orElseThrow().live(),
-                "past two confirmations the value is honestly last known");
+        advance(10_000); // 35 s total: two beats missed
+        store.expire(window);
+        assertFalse(observe(store, CHUNK, window).orElseThrow().live(),
+                "past the window the value is honestly last known");
     }
 
     @Test
@@ -203,11 +202,17 @@ class ClientConcentrationStoreTest {
         ClientConcentrationStore store = newStore();
         for (int invalid : new int[] {0, -1}) {
             try {
-                store.setServerRefreshInterval(invalid);
-                throw new AssertionError("a non-positive interval must be rejected, was " + invalid);
+                store.setServerRefreshInterval(invalid, 10_000);
+                throw new AssertionError("a non-positive tick interval must be rejected, was " + invalid);
             } catch (IllegalArgumentException expected) {
                 // expected
             }
+        }
+        try {
+            store.setServerRefreshInterval(200, 0);
+            throw new AssertionError("a non-positive promise must be rejected");
+        } catch (IllegalArgumentException expected) {
+            // expected
         }
     }
 
@@ -317,9 +322,23 @@ class ClientConcentrationStoreTest {
         assertEquals(Set.of(REGION), store.drainDirtyRegions());
         assertEquals(0, store.regionVersion(REGION));
         assertEquals(OverlayPalette.defaults(), store.serverPalette(), "a dimension change keeps the world's palette");
+    }
+
+    @Test
+    void clearing_the_server_info_resets_the_cadence_and_palette() {
+        ClientConcentrationStore store = newStore();
+        store.setServerRefreshInterval(1200, 60_000);
+        store.setServerPalette(new OverlayPalette(
+                new OverlayPalette.TierStyle(0x111111, 0.1),
+                new OverlayPalette.TierStyle(0x222222, 0.2),
+                new OverlayPalette.TierStyle(0x333333, 0.3),
+                new OverlayPalette.TierStyle(0x444444, 0.4)));
+
         store.clearServerInfo();
-        assertEquals(ClientConcentrationStore.DEFAULT_SERVER_REFRESH_INTERVAL_TICKS,
-                store.serverRefreshIntervalTicks());
+
+        assertEquals(ClientConcentrationStore.DEFAULT_SERVER_REFRESH_MILLIS, store.serverRefreshMillis(),
+                "another world must not inherit this server's cadence");
+        assertEquals(OverlayPalette.defaults(), store.serverPalette());
     }
 
     @Test

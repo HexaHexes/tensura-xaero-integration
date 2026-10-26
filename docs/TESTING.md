@@ -28,14 +28,14 @@ CI job starts from a clean checkout, so it cannot hit it.
 
 | Command | Result |
 | --- | --- |
-| `./gradlew test` | **128 tests, 0 failures, 0 errors** (10 classes) |
+| `./gradlew test` | **129 tests, 0 failures, 0 errors** (10 classes) |
 | `./gradlew build` | **BUILD SUCCESSFUL**, jar produced |
 | `./gradlew runGameTestServer` | **6 tests ran, all passed** — `All 6 required tests passed :)`, task reported `GameTest OK: all 6 tests passed` |
 
 These are the only runs backing the claims in this repository. Nothing
 client-rendering related was verified — see §6.
 
-## 3. JUnit suite (128 tests)
+## 3. JUnit suite (129 tests)
 
 All of these compile and run without Minecraft because the logic sits in
 Minecraft-free classes.
@@ -46,7 +46,7 @@ Minecraft-free classes.
 | `concentration/OverlayPaletteTest` | default palette, `#RRGGBB` parsing incl. malformed input, opacity clamping, Xaero colour encoding (`blue<<24 \| green<<16 \| red<<8 \| alpha`), zero-alpha normal chunks |
 | `cache/CacheKeyAndCacheTest` | key isolation across world token, dimension and coordinates; value/replace/invalidate/clear; missing-data vs valid-zero distinction; bounded size and eviction |
 | `refresh/RefreshSchedulingTest` | `UpdateQueue` change detection and deduplication, per-chunk minimum interval (delayed, never dropped), bounded drain, `retainOnly` pruning, `ReconcileCursor` rotation and budget covering the whole set |
-| `client/ClientConcentrationStoreTest` | mapped-only ingress (an unmapped chunk cannot be stored even when offered), server-supplied bands (including an unbanded value), live→last-known demotion and promotion, the freshness window derived from the server's cadence, stale/unavailable handling, replay that never overwrites live data and keeps the stored band, region version bumps on visible changes only, `clearServerInfo` |
+| `client/ClientConcentrationStoreTest` | mapped-only ingress (an unmapped chunk cannot be stored even when offered), server-supplied bands (including an unbanded value), live→last-known demotion and promotion, the wall-clock freshness window derived from the server's measured cadence (including a stalled server), stale/unavailable handling, replay that never overwrites live data and keeps the stored band, region version bumps on visible changes only, `clearServerInfo` — all on an injected clock, so no test sleeps |
 | `tiers/TierParserTest` | datapack schema: baseline-only and per-dimension ladders, multiple dimensions per file, palette files, partial or non-increasing ladders rejected, unlisted dimensions falling back, unclassifiable dimensions, broken files skipped without emptying the table |
 | `cache/ConcentrationFileFormatTest` | write/read round trip, empty file, wrong magic, unknown version (incl. a version-1 file), row limit, negative count, non-finite value, impossible band code, truncation, invalid row construction |
 | `client/ConcentrationStorageTest` | save and load a world, queued save plus flush, missing and corrupt files read as no history, per-world name uniqueness and sanitising (no path escape) |

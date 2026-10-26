@@ -4,7 +4,30 @@ All notable changes to this project. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses
 semantic versioning with pre-release suffixes.
 
-## [0.1.0-alpha.7] — 2026-10-26
+## [0.1.0-alpha.8] — 2026-10-26
+
+Values stopped flickering between current and last known on a busy server.
+
+### Fixed
+
+- **Live values dimmed and came back on servers that could not keep up.** The
+  freshness window was counted in client ticks while the heartbeat was counted in
+  server ticks, so the two clocks were compared as if they were the same. On a pack
+  heavy enough to log `Can't keep up! ... 120 ticks behind`, 200 server ticks take
+  far longer than 200 client ticks, the window expired between two confirmations,
+  and the value flipped to last known until the next one arrived - including for the
+  chunk you were standing on. Freshness is now measured in **milliseconds of real
+  time** on the client, and the server reports how long one of its confirmations
+  actually takes (measured, not assumed), so a slow server widens its own window.
+- The window is now three confirmations rather than two. One beat of slack is not a
+  margin: a single multi-second stall consumed it.
+- `ServerInfoPayload` carries the measured cadence in milliseconds alongside the tick
+  count; protocol version is now 4.
+
+### Changed
+
+- `ConcentrationEntry` timestamps are wall-clock milliseconds, and the client store
+  takes an injectable clock, so the tests describe a stalled server without sleeping.
 
 Tier entries for the dimensions the Tensura RPG pack actually has.
 

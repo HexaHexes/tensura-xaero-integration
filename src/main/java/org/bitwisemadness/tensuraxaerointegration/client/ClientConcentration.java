@@ -113,14 +113,13 @@ public final class ClientConcentration {
         if (!token.equals(this.worldToken) || !dimension.equals(this.dimensionId)) {
             beginSession(token, dimension);
         }
-        store().tick();
         this.ticks++;
 
         if (this.ticks % MAINTENANCE_INTERVAL_TICKS == 0) {
             // The window follows the server's own confirmation cadence, so it can
             // never be shorter than the server's heartbeat or longer than the
             // server's promise to keep a chunk current.
-            store().expire(store().staleAfterTicks());
+            store().expire(store().staleAfterMillis());
         }
         if (this.ticks - this.lastSaveTick >= SAVE_INTERVAL_TICKS) {
             this.lastSaveTick = this.ticks;

@@ -66,12 +66,19 @@ is meant to tint terrain, not hide it.
 | `historicalOpacityScale` | `0.45` | How bright a last-known value is drawn, as a fraction of its band's opacity. `0.0` keeps remembered values off the map entirely (they still answer the hover line); `1.0` draws them exactly as bright as a current value. |
 
 How long a value counts as **current** is not a client setting. It is derived from
-the server's `refresh.refreshIntervalTicks` — twice that interval, floored at 100
-ticks — because the server is the only side that knows how often it will confirm a
-chunk again. Keeping a second number here would let the two disagree: too short and
-values the server is still confirming would dim, too long and values it stopped
-confirming would claim to be current. The interval in force is logged on join, next
-to the baseline.
+the server's own confirmation cadence — three confirmations, floored at 3 seconds —
+because the server is the only side that knows how often it will confirm a chunk
+again. Keeping a second number here would let the two disagree: too short and values
+the server is still confirming would dim, too long and values it stopped confirming
+would claim to be current.
+
+The window is measured in **milliseconds of real time**, and the server reports how
+long one of its confirmations actually takes, not just how many ticks it waits. That
+distinction matters on a heavy pack: a server that prints `Can't keep up! ... 120
+ticks behind` stretches its 200-tick interval to many seconds, and a window counted
+in client ticks then expires before the next confirmation arrives. Three beats of
+slack is what absorbs the remaining stutters. The measured cadence is logged on join,
+next to the baseline.
 
 This is the line between "the server says this is what it is now" and "this is
 what it was when I was last there". It is a display rule, not a data rule: the
@@ -219,7 +226,7 @@ which is exactly the knob this datapack provides.
 | `reconcileIntervalTicks` | `100` | How often the periodic sweep runs. |
 | `reconcileBudgetChunksPerPlayer` | `256` | Most subscribed chunks re-read per player per sweep. The cursor rotates, so every subscription is visited over successive sweeps. |
 | `minUpdateIntervalTicks` | `20` | Minimum ticks between two sends for the same chunk. A change inside the window stays pending — it is delayed, never dropped. |
-| `refreshIntervalTicks` | `200` | How often a subscribed chunk whose value has **not** changed is confirmed again. A chunk parked at its magicule ceiling never changes, so without this heartbeat it would be sent once and then count as last known on the client. Clients derive their freshness window from this value (twice the interval), so raising it also makes values stay current for longer. |
+| `refreshIntervalTicks` | `200` | How often a subscribed chunk whose value has **not** changed is confirmed again. A chunk parked at its magicule ceiling never changes, so without this heartbeat it would be sent once and then count as last known on the client. Clients derive their freshness window from this cadence (three times the interval, measured in real time), so raising it also makes values stay current for longer. |
 | `maxUpdatesPerPacket` | `256` | Chunk updates batched into one packet. |
 
 ---

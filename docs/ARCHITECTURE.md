@@ -130,10 +130,13 @@ Responsibilities:
   values (`NaN` = no authoritative value right now) and a `byte[]` of band codes
   (`-1` = the server could not classify it). The band travels with the value
   because the server owns the tier table.
-- `ServerInfoPayload` (S2C): the server's configured baseline, its
-  `refreshIntervalTicks` and the datapack palette, so clients neither guess the
-  baseline nor keep a second, independent freshness number that could disagree
-  with the server, and paints bands the pack actually chose.
+- `ServerInfoPayload` (S2C): the server's configured baseline, its refresh cadence
+  in ticks **and in measured milliseconds**, and the datapack palette. Clients
+  neither guess the baseline nor keep a second, independent freshness number, and
+  paint bands the pack actually chose. The millisecond promise exists because a
+  server that cannot keep up stretches its ticks: a client-side window counted in
+  client ticks expires early against such a server, which is what made values
+  flicker between live and last known.
 - `PackedChunkPos`: `(x << 32) | (z & 0xFFFFFFFFL)` with sign-safe unpacking.
 
 ## 4. Client components
@@ -159,7 +162,7 @@ requested.
 Pure, Minecraft-free store (`ChunkCacheKey` → entry) with two display states.
 
 A value is either **live** (the server confirmed it within the freshness window,
-which is twice the server's announced `refreshIntervalTicks`) or
+three times the server's measured confirmation time, on a wall clock) or
 **last known** (a real earlier observation that is no longer being refreshed).
 `observe(...)` returns one `Observation` carrying the value, its band and which
 of the two it is; the renderers and the hover line never look at the raw entry.
