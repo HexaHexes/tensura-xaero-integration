@@ -139,18 +139,45 @@ the configured radius around the player. A chunk that is not mapped is never
 requested.
 
 ### `client/ClientConcentrationStore`
-Pure, Minecraft-free store (`ChunkCacheKey` → entry). Three rules:
+Pure, Minecraft-free store (`ChunkCacheKey` → entry) with two display states.
+
+A value is either **live** (the server reported it within `staleAfterTicks`) or
+**last known** (a real earlier observation that is no longer being refreshed).
+`observe(...)` returns one `Observation` carrying the value, its band and which
+of the two it is; the renderers and the hover line never look at the raw entry.
+The four rules that make this safe:
 
 - `offer(key, mapped, value)` **refuses the write when `mapped` is false**, so an
   unmapped chunk can never enter the cache even if a packet named it.
-- Entries carry both the value and a "last refreshed" tick; `expire()` marks
-  values past `staleAfterTicks` as stale (they stop painting and the hover line
-  says unavailable instead of showing a number), `purge()` drops them entirely.
-- Every accepted change bumps that chunk's region version, which is what the
-  overlay's region hash reads.
+- `demote(key)` keeps the number but drops it to last-known, and `expire()` does
+  the same for anything past `staleAfterTicks`. Demotion is a visible change, so
+  it bumps the region version exactly once - the map repaints from bright to dim
+  without repainting again every sweep.
+- `markUnavailable(key, mapped)` demotes rather than deletes: when the server
+  says "no value for this chunk any more" (it unloaded), the last observation is
+  what the map should still show, labelled as last known. With nothing held, the
+  chunk is recorded as unavailable and draws nothing.
+- Every accepted change - including a promotion or demotion - bumps that chunk's
+  region version, which is what the overlay's region hash reads.
 
-`markUnavailable(key, mapped)` records "authoritative answer is missing" without
-inventing a value; the entry renders as nothing and reads as unavailable.
+Values are never interpolated, extrapolated or invented; an unavailable chunk
+stays unavailable.
+
+### `client/ConcentrationStorage`
+Per-world file store for last-known values: one file under
+`<game dir>/tensura_xaero_integration/`, all dimensions in it, keyed by a
+sanitised world token plus a hash of the exact token so two worlds can never
+collide. Saves are atomic (temp file then move), periodic saves run on a daemon
+thread, and session transitions save inline so the reload that follows sees the
+new file. A corrupt or missing file reads as "no history" and the game carries
+on. The writer thread exists only for the 30-second in-game save, so no map
+frame ever waits on disk.
+
+On session start (and on a dimension change, where the store is cleared) the
+file is replayed through `restoreHistory`, which can never overwrite a value the
+server already sent this session, and marks everything it loads as last known.
+A row in the file is trusted to be a mapped chunk by construction: only the
+mapped-only ingress ever writes one, and Xaero does not un-map a chunk.
 
 ### `client/ClientPayloadHandler`
 Dispatches `ConcentrationPayload` and `BaselinePayload` on the client thread via
@@ -217,7 +244,8 @@ world-map-only install loads only what exists.
 | `concentration/OverlayPalette` | `#RRGGBB` parsing, per-band ARGB in Xaero's encoding |
 | `refresh/UpdateQueue` | change detection, per-chunk minimum interval, bounded drain, retention pruning |
 | `refresh/ReconcileCursor` | rotating bounded slice over a set |
-| `client/ClientConcentrationStore` | mapped-only ingress, staleness, region versions |
+| `cache/ConcentrationFileFormat` | strict binary codec for the persisted last-known values |
+| `client/ClientConcentrationStore` | mapped-only ingress, live/last-known states, replay, region versions |
 
 These carry the logic that the specification cares about, which is why the JUnit
 suite can cover it without a game client.
@@ -249,9 +277,10 @@ Xaero recomputes the region highlight hash → repaint
 
 Periodic reconciliation runs the same offer path from `onServerTick`, reading a
 rotating slice of the player's subscriptions. It exists because
-`CHUNK_TICK_POST` only fires for ticking, loaded chunks: a chunk that unloads, or
-one whose value changed while no observer ran, would otherwise keep a stale
-value forever.
+`CHUNK_TICK_POST` only fires for ticking, loaded chunks: a value that changed
+while no observer ran would otherwise never be corrected, and a chunk that has
+unloaded has to be reported as unavailable so the client can demote its last
+observation instead of presenting it as current.
 
 ## 7. Failure behaviour
 
@@ -260,9 +289,10 @@ value forever.
 | Tensura absent | bridge gate false; coordinator sends nothing; no Tensura class loaded |
 | Xaero mod absent | that bridge reports unavailable, its mixin config never applies, other features unaffected |
 | Neither present | mod loads, both configs register, nothing is drawn or sent |
-| Chunk unloaded | reported unavailable (`NaN`); client stops drawing and says unavailable |
+| Chunk unloaded | server sends `NaN`; client demotes its value to last known, drawn dimmer |
+| Chunk leaves the request radius | value demoted to last known, kept in memory and on disk |
 | Packet names an unmapped chunk | store refuses the write |
-| Dimension change | old subscriptions released, store cleared, baseline kept |
-| World change / disconnect | full session reset, including baseline |
+| Dimension change | old subscriptions released, store saved, cleared and replayed as history |
+| World change / disconnect | session saved, then full reset including baseline |
 | Value unchanged | no packet, no repaint |
 | Config threshold order invalid | falls back to defaults with one warning |

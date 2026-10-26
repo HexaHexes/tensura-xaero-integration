@@ -27,7 +27,9 @@ public final class ClientSetup {
     }
 
     private static void onLoggingOut(ClientPlayerNetworkEvent.LoggingOut event) {
+        // Saves the session's last-known values, then waits for any queued write.
         ClientConcentration.get().resetSession();
+        ClientConcentration.get().flushPersistence();
     }
 
     /** Repaints everything after a client config edit that changes the overlay. */

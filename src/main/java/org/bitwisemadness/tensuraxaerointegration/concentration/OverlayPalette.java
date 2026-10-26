@@ -1,5 +1,6 @@
 package org.bitwisemadness.tensuraxaerointegration.concentration;
 
+import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.function.IntFunction;
 
@@ -58,18 +59,24 @@ public record OverlayPalette(TierStyle slightlyElevated,
                 new TierStyle(0xEC407A, 0.45));
     }
 
-    /** The style for a band; {@code NORMAL} has no style. */
-    public OptionalInt styleFor(ConcentrationClassification classification) {
-        if (classification == null || classification == ConcentrationClassification.NORMAL) {
-            return OptionalInt.empty();
+    /** The style for a band; {@code NORMAL} (and {@code null}) has no style. */
+    public Optional<TierStyle> tierFor(ConcentrationClassification classification) {
+        if (classification == null) {
+            return Optional.empty();
         }
-        return OptionalInt.of(switch (classification) {
-            case SLIGHTLY_ELEVATED -> this.slightlyElevated.xaeroColor();
-            case MODERATELY_ELEVATED -> this.moderatelyElevated.xaeroColor();
-            case HIGHLY_ELEVATED -> this.highlyElevated.xaeroColor();
-            case EXCEPTIONALLY_ELEVATED -> this.exceptionallyElevated.xaeroColor();
-            case NORMAL -> throw new IllegalStateException("NORMAL has no style");
-        });
+        return switch (classification) {
+            case NORMAL -> Optional.empty();
+            case SLIGHTLY_ELEVATED -> Optional.of(this.slightlyElevated);
+            case MODERATELY_ELEVATED -> Optional.of(this.moderatelyElevated);
+            case HIGHLY_ELEVATED -> Optional.of(this.highlyElevated);
+            case EXCEPTIONALLY_ELEVATED -> Optional.of(this.exceptionallyElevated);
+        };
+    }
+
+    /** The packed colour for a band, empty when the band is not painted. */
+    public OptionalInt styleFor(ConcentrationClassification classification) {
+        Optional<TierStyle> tier = tierFor(classification);
+        return tier.isPresent() ? OptionalInt.of(tier.get().xaeroColor()) : OptionalInt.empty();
     }
 
     /**
@@ -81,7 +88,20 @@ public record OverlayPalette(TierStyle slightlyElevated,
      * line to be shown while nothing is painted.</p>
      */
     public int xaeroColorFor(ConcentrationClassification classification) {
-        return styleFor(classification).orElse(0);
+        return xaeroColorFor(classification, 1.0);
+    }
+
+    /**
+     * The colour for a band with its opacity scaled, used to draw a last-known
+     * value dimmer than a live one.
+     *
+     * <p>A band that is not painted stays fully transparent at every scale, and
+     * the scale is clamped to {@code 0..1} so this can never brighten a band.</p>
+     */
+    public int xaeroColorFor(ConcentrationClassification classification, double opacityScale) {
+        return tierFor(classification)
+                .map(tier -> xaeroColor(tier.rgb(), tier.opacity() * clamp(opacityScale)))
+                .orElse(0);
     }
 
     /** Packs 0xRRGGBB + opacity into Xaero's {@code BBGGRRAA} int layout. */

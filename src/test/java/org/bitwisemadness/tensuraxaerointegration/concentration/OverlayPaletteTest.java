@@ -78,6 +78,44 @@ class OverlayPaletteTest {
     }
 
     @Test
+    void scaling_dims_a_band_without_changing_its_hue() {
+        OverlayPalette palette = OverlayPalette.defaults();
+        int live = palette.xaeroColorFor(ConcentrationClassification.HIGHLY_ELEVATED);
+        int dimmed = palette.xaeroColorFor(ConcentrationClassification.HIGHLY_ELEVATED, 0.5);
+
+        // Xaero packs blue, green, red; the hue is the same in both colours.
+        assertEquals(0xBC47AB, (dimmed >> 8) & 0xFFFFFF, "red, green and blue are unchanged");
+        assertTrue((dimmed & 0xFF) < (live & 0xFF), "only alpha drops");
+        assertTrue((dimmed & 0xFF) >= (live & 0xFF) / 2 - 1, "and it drops to roughly half");
+    }
+
+    @Test
+    void a_full_scale_is_the_painted_colour_and_zero_hides_it() {
+        OverlayPalette palette = OverlayPalette.defaults();
+        assertEquals(palette.xaeroColorFor(ConcentrationClassification.MODERATELY_ELEVATED),
+                palette.xaeroColorFor(ConcentrationClassification.MODERATELY_ELEVATED, 1.0));
+        assertEquals(0, palette.xaeroColorFor(ConcentrationClassification.MODERATELY_ELEVATED, 0.0) & 0xFF,
+                "a zero scale leaves the colour but paints nothing");
+    }
+
+    @Test
+    void scaling_never_brightens_a_band() {
+        OverlayPalette palette = OverlayPalette.defaults();
+        int live = palette.xaeroColorFor(ConcentrationClassification.SLIGHTLY_ELEVATED);
+        assertEquals(live & 0xFF,
+                palette.xaeroColorFor(ConcentrationClassification.SLIGHTLY_ELEVATED, 4.0) & 0xFF);
+        assertEquals(0, palette.xaeroColorFor(ConcentrationClassification.SLIGHTLY_ELEVATED, Double.NaN) & 0xFF,
+                "a non-finite scale paints nothing rather than throwing");
+    }
+
+    @Test
+    void normal_stays_transparent_at_every_scale() {
+        OverlayPalette palette = OverlayPalette.defaults();
+        assertEquals(0, palette.xaeroColorFor(ConcentrationClassification.NORMAL, 1.0));
+        assertEquals(0, palette.xaeroColorFor(null, 0.5));
+    }
+
+    @Test
     void config_values_fall_back_per_field() {
         OverlayPalette defaults = OverlayPalette.defaults();
         OverlayPalette config = OverlayPalette.fromConfig(

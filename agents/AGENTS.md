@@ -42,6 +42,12 @@ third-party API — it records what those jars actually expose and what they do 
   cached or servery. `ClientConcentrationStore.offer` refuses unmapped writes and
   `ConcentrationServer` only answers subscribed chunks — do not add a path around
   either gate.
+- **Last-known values are still real observations.** Persistence only ever writes
+  what the mapped-only ingress already accepted, and a replayed value is always
+  `historical`, so it is drawn dimmer and hover says "(last known)". Never store a
+  value for an unmapped or never-visited chunk, and never let a replayed value
+  compare equal to a live one (the cache treats `historical` as part of the
+  observation for exactly that reason).
 
 ---
 

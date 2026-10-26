@@ -143,8 +143,41 @@ class CacheKeyAndCacheTest {
     @Test
     void entries_reject_inconsistent_availability() {
         assertThrows(IllegalArgumentException.class,
-                () -> new ConcentrationEntry(Double.NaN, 1, true));
+                () -> new ConcentrationEntry(Double.NaN, 1, true, false));
         assertThrows(IllegalArgumentException.class,
-                () -> new ConcentrationEntry(5.0, 1, false));
+                () -> new ConcentrationEntry(5.0, 1, false, false));
+        assertThrows(IllegalArgumentException.class,
+                () -> new ConcentrationEntry(Double.NaN, 1, false, true));
+    }
+
+    @Test
+    void a_last_known_entry_is_never_fresh() {
+        ConcentrationEntry entry = ConcentrationEntry.lastKnown(600.0);
+        assertEquals(600.0, entry.value());
+        assertTrue(entry.historical());
+        assertFalse(entry.fresh(0, 10_000), "a remembered value is not a current one");
+    }
+
+    @Test
+    void demoting_keeps_the_value_and_counts_as_a_change() {
+        ConcentrationCache cache = new ConcentrationCache(8);
+        cache.put(OVERWORLD_SAVE_A, 600.0, 5);
+        assertTrue(cache.demote(OVERWORLD_SAVE_A));
+        assertFalse(cache.demote(OVERWORLD_SAVE_A), "already last known");
+        assertEquals(600.0, cache.value(OVERWORLD_SAVE_A).getAsDouble());
+        assertTrue(cache.entry(OVERWORLD_SAVE_A).orElseThrow().historical());
+        assertTrue(cache.freshValue(OVERWORLD_SAVE_A, 5, 100).isEmpty());
+    }
+
+    @Test
+    void a_replayed_value_never_overwrites_a_live_one() {
+        ConcentrationCache cache = new ConcentrationCache(8);
+        cache.put(OVERWORLD_SAVE_A, 600.0, 5);
+        assertFalse(cache.putLastKnown(OVERWORLD_SAVE_A, 900.0));
+        assertEquals(600.0, cache.value(OVERWORLD_SAVE_A).getAsDouble());
+
+        ChunkCacheKey untouched = new ChunkCacheKey("sp:save-a", "minecraft:overworld", 41, 41);
+        assertTrue(cache.putLastKnown(untouched, 900.0));
+        assertTrue(cache.entry(untouched).orElseThrow().historical());
     }
 }

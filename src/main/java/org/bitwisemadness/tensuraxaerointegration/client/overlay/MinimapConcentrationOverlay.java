@@ -5,7 +5,7 @@ import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.level.Level;
 import org.bitwisemadness.tensuraxaerointegration.cache.RegionKey;
 import org.bitwisemadness.tensuraxaerointegration.client.ClientConcentration;
-import org.bitwisemadness.tensuraxaerointegration.concentration.ConcentrationClassification;
+import org.bitwisemadness.tensuraxaerointegration.client.ClientConcentrationStore.Observation;
 import org.bitwisemadness.tensuraxaerointegration.config.ClientConfig;
 import xaero.common.minimap.highlight.ChunkHighlighter;
 import xaero.hud.minimap.info.render.compile.InfoDisplayCompiler;
@@ -41,16 +41,18 @@ public final class MinimapConcentrationOverlay extends ChunkHighlighter {
 
     @Override
     public boolean chunkIsHighlit(ResourceKey<Level> dimension, int chunkX, int chunkZ) {
-        return classification(dimension, chunkX, chunkZ).isPresent();
+        return observation(dimension, chunkX, chunkZ).isPresent();
     }
 
     @Override
     protected int[] getColors(ResourceKey<Level> dimension, int chunkX, int chunkZ) {
-        Optional<ConcentrationClassification> classification = classification(dimension, chunkX, chunkZ);
-        if (classification.isEmpty()) {
+        Optional<Observation> observation = observation(dimension, chunkX, chunkZ);
+        if (observation.isEmpty()) {
             return null;
         }
-        int colour = ClientConfig.palette().xaeroColorFor(classification.get());
+        Observation value = observation.get();
+        double scale = value.live() ? 1.0 : ClientConfig.historicalOpacityScale();
+        int colour = ClientConfig.palette().xaeroColorFor(value.classification().orElse(null), scale);
         return new int[] {colour, colour, colour, colour, colour};
     }
 
@@ -66,12 +68,11 @@ public final class MinimapConcentrationOverlay extends ChunkHighlighter {
         // No minimap readout is part of this mod's scope.
     }
 
-    private static Optional<ConcentrationClassification> classification(ResourceKey<Level> dimension,
-            int chunkX, int chunkZ) {
+    private static Optional<Observation> observation(ResourceKey<Level> dimension, int chunkX, int chunkZ) {
         if (!ClientConfig.minimapOverlayEnabled()) {
             return Optional.empty();
         }
-        return ClientConcentration.get().store().classification(
+        return ClientConcentration.get().store().observe(
                 ClientConcentration.get().key(dimension, chunkX, chunkZ),
                 ClientConfig.staleAfterTicks(),
                 ClientConfig.thresholds());

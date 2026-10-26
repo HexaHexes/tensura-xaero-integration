@@ -4,6 +4,36 @@ All notable changes to this project. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses
 semantic versioning with pre-release suffixes.
 
+## [0.1.0-alpha.2] — 2026-10-25
+
+Last-known concentrations: mapped chunks keep what was last observed there after
+they unload, dimmed and labelled as last known.
+
+### Added
+
+- **Per-world concentration history.** Values are saved to
+  `<game dir>/tensura_xaero_integration/<world>-<hash>.bin` (all dimensions in one
+  file) every 30 seconds and whenever the session ends or changes dimension, then
+  replayed on join. Only chunks that passed the mapped-only ingress are ever
+  written, so a replay cannot reveal a chunk this client had not mapped.
+- **Last-known display state.** A value the server stops refreshing is kept and
+  drawn at `freshness.historicalOpacityScale` (default 45% of its band's opacity);
+  the hover line appends `(last known)` instead of presenting it as current.
+- **`[persistence]` client config** (`enabled`, `maxEntriesPerWorld`) and
+  `freshness.historicalOpacityScale`.
+
+### Changed
+
+- A chunk leaving the request radius or unloading is now **demoted** to last
+  known instead of being forgotten, so an explored area stays readable.
+- `freshness.purgeAfterTicks` was removed: memory is bounded by
+  `persistence.maxEntriesPerWorld` rather than by dropping remembered values.
+
+### Fixed
+
+- A value that alternated between current and remembered did not repaint the map,
+  because the two states compared as the same observation.
+
 ## [0.1.0-alpha.1] — 2026-10-25
 
 First alpha. Server-side concentration reading, hybrid refresh, both map

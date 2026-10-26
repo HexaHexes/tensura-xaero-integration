@@ -4,10 +4,13 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import org.bitwisemadness.tensuraxaerointegration.cache.ChunkCacheKey;
 import org.bitwisemadness.tensuraxaerointegration.cache.RegionKey;
+import org.bitwisemadness.tensuraxaerointegration.client.ClientConcentrationStore.Observation;
+import org.bitwisemadness.tensuraxaerointegration.client.ClientConcentrationStore.StoredValue;
 import org.bitwisemadness.tensuraxaerointegration.concentration.ConcentrationClassification;
 import org.bitwisemadness.tensuraxaerointegration.concentration.ConcentrationThresholds;
 import org.junit.jupiter.api.Test;
@@ -24,12 +27,16 @@ class ClientConcentrationStoreTest {
         return store;
     }
 
+    private static Optional<Observation> observe(ClientConcentrationStore store, ChunkCacheKey key, long stale) {
+        return store.observe(key, stale, ConcentrationThresholds.defaults());
+    }
+
     @Test
     void unmapped_values_are_never_stored() {
         ClientConcentrationStore store = newStore();
         assertFalse(store.offer(CHUNK, false, 4000.0));
         assertEquals(0, store.size());
-        assertTrue(store.displayValue(CHUNK, 100).isEmpty());
+        assertTrue(observe(store, CHUNK, 100).isEmpty());
         assertTrue(store.drainDirtyRegions().isEmpty(), "nothing to repaint");
     }
 
@@ -37,18 +44,20 @@ class ClientConcentrationStoreTest {
     void mapped_values_are_stored_and_classified_against_the_baseline() {
         ClientConcentrationStore store = newStore();
         assertTrue(store.offer(CHUNK, true, 600.0));
-        assertEquals(600.0, store.displayValue(CHUNK, 100).getAsDouble());
-        Optional<ConcentrationClassification> classification =
-                store.classification(CHUNK, 100, ConcentrationThresholds.defaults());
-        assertEquals(Optional.of(ConcentrationClassification.SLIGHTLY_ELEVATED), classification);
+        Observation observation = observe(store, CHUNK, 100).orElseThrow();
+        assertEquals(600.0, observation.value());
+        assertTrue(observation.live(), "a fresh value is live");
+        assertEquals(Optional.of(ConcentrationClassification.SLIGHTLY_ELEVATED), observation.classification());
+        assertTrue(observation.elevated());
     }
 
     @Test
     void a_baseline_value_is_classified_normal() {
         ClientConcentrationStore store = newStore();
         store.offer(CHUNK, true, 500.0);
-        assertEquals(Optional.of(ConcentrationClassification.NORMAL),
-                store.classification(CHUNK, 100, ConcentrationThresholds.defaults()));
+        Observation observation = observe(store, CHUNK, 100).orElseThrow();
+        assertEquals(Optional.of(ConcentrationClassification.NORMAL), observation.classification());
+        assertFalse(observation.elevated());
     }
 
     @Test
@@ -68,7 +77,7 @@ class ClientConcentrationStoreTest {
         store.offer(CHUNK, true, 500.0); // back to normal
         assertEquals(3, store.regionVersion(REGION));
         assertEquals(Optional.of(ConcentrationClassification.NORMAL),
-                store.classification(CHUNK, 100, ConcentrationThresholds.defaults()));
+                observe(store, CHUNK, 100).orElseThrow().classification());
     }
 
     @Test
@@ -90,7 +99,7 @@ class ClientConcentrationStoreTest {
     }
 
     @Test
-    void stale_values_stop_being_displayed_and_repaint_once() {
+    void a_value_that_stops_being_refreshed_becomes_last_known_and_repaints_once() {
         ClientConcentrationStore store = newStore();
         store.offer(CHUNK, true, 600.0);
         store.drainDirtyRegions();
@@ -99,9 +108,10 @@ class ClientConcentrationStoreTest {
             store.tick();
         }
         store.expire(10);
-        assertTrue(store.displayValue(CHUNK, 10).isEmpty(), "stale values are not displayed");
-        assertEquals(Set.of(REGION), store.drainDirtyRegions(), "the stale colour must be removed");
-        assertEquals(0, store.classification(CHUNK, 10, ConcentrationThresholds.defaults()).stream().count());
+        Observation observation = observe(store, CHUNK, 10).orElseThrow();
+        assertEquals(600.0, observation.value(), "the observation itself is kept");
+        assertFalse(observation.live(), "but it is no longer current");
+        assertEquals(Set.of(REGION), store.drainDirtyRegions(), "the dim colour must be painted");
 
         // Expiring again is a no-op: one repaint, not one per sweep.
         store.expire(10);
@@ -109,32 +119,104 @@ class ClientConcentrationStoreTest {
     }
 
     @Test
-    void a_refresh_after_expiry_makes_the_value_displayable_again() {
+    void a_refresh_after_demotion_makes_the_value_live_again() {
         ClientConcentrationStore store = newStore();
         store.offer(CHUNK, true, 600.0);
         for (int i = 0; i < 30; i++) {
             store.tick();
         }
         store.expire(10);
-        store.offer(CHUNK, true, 600.0);
-        assertTrue(store.displayValue(CHUNK, 10).isPresent());
+        store.drainDirtyRegions();
+
+        assertTrue(store.offer(CHUNK, true, 600.0), "going live again is a visible change");
+        assertTrue(observe(store, CHUNK, 10).orElseThrow().live());
+        assertEquals(Set.of(REGION), store.drainDirtyRegions());
     }
 
     @Test
-    void unavailable_entries_are_not_displayed() {
+    void an_unavailable_answer_keeps_the_last_known_value() {
         ClientConcentrationStore store = newStore();
         store.offer(CHUNK, true, 600.0);
+        store.drainDirtyRegions();
+
+        assertTrue(store.markUnavailable(CHUNK, true));
+        Observation observation = observe(store, CHUNK, 100).orElseThrow();
+        assertEquals(600.0, observation.value());
+        assertFalse(observation.live(), "the server no longer vouches for it");
+        assertEquals(Set.of(REGION), store.drainDirtyRegions());
+    }
+
+    @Test
+    void an_unavailable_answer_with_nothing_held_records_unavailable() {
+        ClientConcentrationStore store = newStore();
         store.markUnavailable(CHUNK, true);
-        assertTrue(store.displayValue(CHUNK, 100).isEmpty());
-        assertTrue(store.classification(CHUNK, 100, ConcentrationThresholds.defaults()).isEmpty());
+        assertTrue(observe(store, CHUNK, 100).isEmpty());
+        assertTrue(store.storedValues().isEmpty(), "nothing available is worth persisting");
+    }
+
+    @Test
+    void unmapped_unavailable_answers_are_ignored() {
+        ClientConcentrationStore store = newStore();
+        assertFalse(store.markUnavailable(CHUNK, false));
+        assertEquals(0, store.size());
+    }
+
+    @Test
+    void demotion_keeps_the_value_without_a_server_answer() {
+        ClientConcentrationStore store = newStore();
+        store.offer(CHUNK, true, 900.0);
+        assertTrue(store.demote(CHUNK));
+        assertFalse(observe(store, CHUNK, 100).orElseThrow().live());
+        assertFalse(store.demote(CHUNK), "already last known: no further change");
     }
 
     @Test
     void without_a_baseline_the_value_has_no_classification() {
         ClientConcentrationStore store = new ClientConcentrationStore(8);
         store.offer(CHUNK, true, 600.0);
-        assertTrue(store.displayValue(CHUNK, 100).isPresent());
-        assertTrue(store.classification(CHUNK, 100, ConcentrationThresholds.defaults()).isEmpty());
+        Observation observation = observe(store, CHUNK, 100).orElseThrow();
+        assertEquals(600.0, observation.value());
+        assertTrue(observation.classification().isEmpty());
+        assertFalse(observation.elevated());
+    }
+
+    @Test
+    void restored_history_is_last_known_and_never_overwrites_live_data() {
+        ClientConcentrationStore store = newStore();
+        ChunkCacheKey remembered = new ChunkCacheKey("sp:world", "minecraft:overworld", 40, 40);
+        store.offer(CHUNK, true, 800.0);
+
+        boolean changed = store.restoreHistory(
+                List.of(new StoredValue(CHUNK, 600.0), new StoredValue(remembered, 900.0)), 500.0);
+
+        assertTrue(changed);
+        Observation live = observe(store, CHUNK, 100).orElseThrow();
+        assertEquals(800.0, live.value(), "the server's value wins over the file");
+        assertTrue(live.live());
+
+        Observation replayed = observe(store, remembered, 100).orElseThrow();
+        assertEquals(900.0, replayed.value());
+        assertFalse(replayed.live(), "a replayed value is last known");
+    }
+
+    @Test
+    void restored_baseline_only_fills_a_gap() {
+        ClientConcentrationStore empty = new ClientConcentrationStore(8);
+        empty.restoreHistory(List.of(), 500.0);
+        assertEquals(500.0, empty.baseline());
+
+        ClientConcentrationStore known = newStore();
+        known.restoreHistory(List.of(), 1200.0);
+        assertEquals(500.0, known.baseline(), "a known baseline is not replaced by the file");
+    }
+
+    @Test
+    void stored_values_cover_available_entries_only() {
+        ClientConcentrationStore store = newStore();
+        ChunkCacheKey missing = new ChunkCacheKey("sp:world", "minecraft:overworld", 41, 41);
+        store.offer(CHUNK, true, 600.0);
+        store.markUnavailable(missing, true);
+        assertEquals(List.of(new StoredValue(CHUNK, 600.0)), store.storedValues());
     }
 
     @Test
@@ -144,7 +226,7 @@ class ClientConcentrationStoreTest {
         store.drainDirtyRegions();
         store.clear();
         assertEquals(0, store.size());
-        assertTrue(store.displayValue(CHUNK, 100).isEmpty());
+        assertTrue(observe(store, CHUNK, 100).isEmpty());
         assertEquals(Set.of(REGION), store.drainDirtyRegions());
         assertEquals(0, store.regionVersion(REGION));
         assertEquals(500.0, store.baseline(), "a dimension change keeps the world's baseline");
@@ -160,23 +242,9 @@ class ClientConcentrationStoreTest {
         store.offer(CHUNK, true, 600.0);
         store.offer(nether, true, 2000.0);
         store.offer(otherWorld, true, 900.0);
-        assertEquals(600.0, store.displayValue(CHUNK, 100).getAsDouble());
-        assertEquals(2000.0, store.displayValue(nether, 100).getAsDouble());
-        assertEquals(900.0, store.displayValue(otherWorld, 100).getAsDouble());
-    }
-
-    @Test
-    void purging_removes_only_old_entries() {
-        ClientConcentrationStore store = newStore();
-        store.offer(CHUNK, true, 600.0);
-        ChunkCacheKey recent = new ChunkCacheKey("sp:world", "minecraft:overworld", 40, 40);
-        for (int i = 0; i < 100; i++) {
-            store.tick();
-        }
-        store.offer(recent, true, 700.0);
-        store.purge(50);
-        assertEquals(1, store.size());
-        assertTrue(store.displayValue(recent, 100).isPresent());
+        assertEquals(600.0, observe(store, CHUNK, 100).orElseThrow().value());
+        assertEquals(2000.0, observe(store, nether, 100).orElseThrow().value());
+        assertEquals(900.0, observe(store, otherWorld, 100).orElseThrow().value());
     }
 
     @Test

@@ -7,8 +7,8 @@ import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.level.Level;
 import org.bitwisemadness.tensuraxaerointegration.cache.RegionKey;
 import org.bitwisemadness.tensuraxaerointegration.client.ClientConcentration;
+import org.bitwisemadness.tensuraxaerointegration.client.ClientConcentrationStore.Observation;
 import org.bitwisemadness.tensuraxaerointegration.client.HoverText;
-import org.bitwisemadness.tensuraxaerointegration.concentration.ConcentrationClassification;
 import org.bitwisemadness.tensuraxaerointegration.config.ClientConfig;
 import xaero.map.highlight.ChunkHighlighter;
 
@@ -20,7 +20,8 @@ import xaero.map.highlight.ChunkHighlighter;
  *   <li>{@code coveringOutsideDiscovered} is {@code false}, so Xaero itself never
  *       asks about, colours or tooltips an undiscovered chunk.</li>
  *   <li>{@code chunkIsHighlit} gates both the colour and the hover line, so it
- *       returns true exactly when this client has a fresh value for the chunk.</li>
+ *       returns true exactly when this client holds a value for the chunk - live
+ *       or last known.</li>
  *   <li>{@code calculateRegionHash} is folded into Xaero's cached per-region
  *       highlight hash; returning the region's data version is what turns a
  *       concentration change into a repaint without touching rendering code.</li>
@@ -54,7 +55,7 @@ public final class WorldMapConcentrationOverlay extends ChunkHighlighter {
 
     @Override
     public boolean chunkIsHighlit(ResourceKey<Level> dimension, int chunkX, int chunkZ) {
-        return enabled() && classification(dimension, chunkX, chunkZ).isPresent();
+        return enabled() && observation(dimension, chunkX, chunkZ).isPresent();
     }
 
     @Override
@@ -62,11 +63,15 @@ public final class WorldMapConcentrationOverlay extends ChunkHighlighter {
         if (!ClientConfig.worldMapOverlayEnabled()) {
             return null;
         }
-        Optional<ConcentrationClassification> classification = classification(dimension, chunkX, chunkZ);
-        if (classification.isEmpty()) {
+        Optional<Observation> observation = observation(dimension, chunkX, chunkZ);
+        if (observation.isEmpty()) {
             return null;
         }
-        int colour = ClientConfig.palette().xaeroColorFor(classification.get());
+        Observation value = observation.get();
+        // A value that is no longer refreshed is drawn dimmer, never as bright as
+        // a current one; a normal chunk stays fully transparent either way.
+        double scale = value.live() ? 1.0 : ClientConfig.historicalOpacityScale();
+        int colour = ClientConfig.palette().xaeroColorFor(value.classification().orElse(null), scale);
         return new int[] {colour, colour, colour, colour, colour};
     }
 
@@ -97,9 +102,8 @@ public final class WorldMapConcentrationOverlay extends ChunkHighlighter {
         // The minimap has its own highlighter; nothing to add here.
     }
 
-    private static Optional<ConcentrationClassification> classification(ResourceKey<Level> dimension,
-            int chunkX, int chunkZ) {
-        return ClientConcentration.get().store().classification(
+    private static Optional<Observation> observation(ResourceKey<Level> dimension, int chunkX, int chunkZ) {
+        return ClientConcentration.get().store().observe(
                 ClientConcentration.get().key(dimension, chunkX, chunkZ),
                 ClientConfig.staleAfterTicks(),
                 ClientConfig.thresholds());

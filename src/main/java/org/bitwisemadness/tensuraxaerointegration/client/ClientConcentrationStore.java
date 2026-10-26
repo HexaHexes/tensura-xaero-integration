@@ -1,9 +1,10 @@
 package org.bitwisemadness.tensuraxaerointegration.client;
 
+import java.util.ArrayList;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.OptionalDouble;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import org.bitwisemadness.tensuraxaerointegration.cache.ChunkCacheKey;
@@ -23,24 +24,55 @@ import org.bitwisemadness.tensuraxaerointegration.concentration.ConcentrationThr
  * site. The client also passes {@code false} for chunks its Xaero maps have not
  * written, even if the server offered a value.</p>
  *
+ * <p>A value has two display states. <b>Live</b> means the server reported it
+ * recently. <b>Last known</b> means it is a real observation that is no longer
+ * being refreshed - the chunk left the subscription range, unloaded, or was
+ * replayed from disk. A last-known value is never presented as current: the
+ * overlay dims it and the hover line labels it. Values are never interpolated,
+ * extrapolated or invented, and an unavailable chunk stays unavailable.</p>
+ *
  * <p>Every stored change bumps the {@link RegionKey} version of the chunk's
  * 32x32-chunk region and marks that region dirty. Map invalidation therefore
- * only happens when a value really changed, and the world-map highlighter can
- * answer {@code calculateRegionHash} in constant time from the version.</p>
+ * only happens when a value or its state really changed, and the world-map
+ * highlighter can answer {@code calculateRegionHash} in constant time from the
+ * version.</p>
  *
- * <p>Time is the client tick counter, supplied by {@link #tick()}. An entry that
- * has not been refreshed within the configured staleness window stops being
- * displayed and is reported unavailable, never shown as if it were current.</p>
+ * <p>Time is the client tick counter, supplied by {@link #tick()}.</p>
  */
 public final class ClientConcentrationStore {
 
     /** Fixed region geometry, matching Xaero's 32x32-chunk map regions. */
     public static final int REGION_SHIFT = 5;
 
+    /** A value as the renderers and hover line should see it. */
+    public record Observation(double value, Optional<ConcentrationClassification> classification, boolean live) {
+
+        public Observation {
+            if (!Double.isFinite(value)) {
+                throw new IllegalArgumentException("an observation needs a finite value");
+            }
+        }
+
+        /** Whether this observation should be painted at all. */
+        public boolean elevated() {
+            return this.classification.isPresent()
+                    && this.classification.get() != ConcentrationClassification.NORMAL;
+        }
+    }
+
+    /** One remembered value, used to build the on-disk snapshot and to replay it. */
+    public record StoredValue(ChunkCacheKey key, double value) {
+
+        public StoredValue {
+            if (!Double.isFinite(value) || value < 0.0) {
+                throw new IllegalArgumentException("a stored value must be finite and non-negative");
+            }
+        }
+    }
+
     private final ConcentrationCache cache;
     private final Map<RegionKey, Integer> regionVersions = new ConcurrentHashMap<>();
     private final Set<RegionKey> dirtyRegions = new LinkedHashSet<>();
-    private final Set<ChunkCacheKey> expired = ConcurrentHashMap.newKeySet();
 
     private long tick;
     private double baseline = Double.NaN;
@@ -61,8 +93,7 @@ public final class ClientConcentrationStore {
     /**
      * Sets the server-supplied authoritative baseline.
      *
-     * @param baseline a finite positive value, or NaN when the server has not
-     *                 supplied one
+     * @param baseline a finite positive value, or NaN when unknown
      */
     public void setBaseline(double baseline) {
         if (!Double.isNaN(baseline) && (!Double.isFinite(baseline) || baseline <= 0.0)) {
@@ -77,7 +108,7 @@ public final class ClientConcentrationStore {
     }
 
     /**
-     * Offers a concentration for a chunk.
+     * Offers a current concentration for a chunk.
      *
      * @param mapped whether every enabled map considers the chunk mapped
      * @return true when the stored value changed (and the map needs a repaint)
@@ -88,7 +119,6 @@ public final class ClientConcentrationStore {
             // server offered it. Structurally invisible to every consumer.
             return false;
         }
-        this.expired.remove(key);
         boolean changed = this.cache.put(key, value, this.tick);
         if (changed) {
             bumpRegion(key);
@@ -97,7 +127,11 @@ public final class ClientConcentrationStore {
     }
 
     /**
-     * Marks a chunk's value as no longer readable.
+     * Records that the server cannot report this chunk right now.
+     *
+     * <p>A value this client already holds becomes <em>last known</em> instead of
+     * being thrown away, which is what keeps an exploded area coloured after the
+     * chunk unloads. With nothing held, the chunk is recorded as unavailable.</p>
      *
      * @return true when the visible state changed
      */
@@ -105,7 +139,10 @@ public final class ClientConcentrationStore {
         if (!mapped) {
             return false;
         }
-        this.expired.remove(key);
+        if (this.cache.demote(key)) {
+            bumpRegion(key);
+            return true;
+        }
         boolean changed = this.cache.markUnavailable(key, this.tick);
         if (changed) {
             bumpRegion(key);
@@ -113,34 +150,78 @@ public final class ClientConcentrationStore {
         return changed;
     }
 
-    /** Drops a chunk entirely, e.g. when it stops being subscribed. */
+    /**
+     * Keeps a chunk's value but stops presenting it as current, e.g. when it
+     * leaves the subscription radius.
+     *
+     * @return true when the visible state changed
+     */
+    public boolean demote(ChunkCacheKey key) {
+        boolean changed = this.cache.demote(key);
+        if (changed) {
+            bumpRegion(key);
+        }
+        return changed;
+    }
+
+    /** Drops a chunk entirely, e.g. when it stops being mapped. */
     public void forget(ChunkCacheKey key) {
-        boolean had = this.cache.remove(key);
-        this.expired.remove(key);
-        if (had) {
+        if (this.cache.remove(key)) {
             bumpRegion(key);
         }
     }
 
     /**
-     * The value to display for a chunk: available, present and no older than
-     * {@code staleAfterTicks}. Empty for missing, unavailable or stale values.
+     * The observation to display for a chunk: live when the server refreshed it
+     * recently, otherwise the last known value. Empty when nothing is held.
      */
-    public OptionalDouble displayValue(ChunkCacheKey key, long staleAfterTicks) {
-        if (this.expired.contains(key)) {
-            return OptionalDouble.empty();
-        }
-        return this.cache.freshValue(key, this.tick, staleAfterTicks);
-    }
-
-    /** The classification for a chunk, when it has a displayable value. */
-    public Optional<ConcentrationClassification> classification(ChunkCacheKey key, long staleAfterTicks,
+    public Optional<Observation> observe(ChunkCacheKey key, long staleAfterTicks,
             ConcentrationThresholds thresholds) {
-        OptionalDouble value = displayValue(key, staleAfterTicks);
-        if (value.isEmpty() || !Double.isFinite(this.baseline) || this.baseline <= 0.0) {
+        Optional<ConcentrationEntry> entry = this.cache.entry(key);
+        if (entry.isEmpty() || !entry.get().available()) {
             return Optional.empty();
         }
-        return thresholds.classifyIfValid(value.getAsDouble(), this.baseline);
+        ConcentrationEntry value = entry.get();
+        boolean live = value.fresh(this.tick, staleAfterTicks);
+        Optional<ConcentrationClassification> classification = Optional.empty();
+        if (Double.isFinite(this.baseline) && this.baseline > 0.0) {
+            classification = thresholds.classifyIfValid(value.value(), this.baseline);
+        }
+        return Optional.of(new Observation(value.value(), classification, live));
+    }
+
+    /** Every available value held, live or last-known; the persistence snapshot. */
+    public List<StoredValue> storedValues() {
+        List<StoredValue> values = new ArrayList<>();
+        for (ConcentrationCache.Snapshot snapshot : this.cache.snapshot()) {
+            if (snapshot.entry().available()) {
+                values.add(new StoredValue(snapshot.key(), snapshot.entry().value()));
+            }
+        }
+        return values;
+    }
+
+    /**
+     * Replays remembered values and their baseline.
+     *
+     * <p>Restored values are always last-known, and a value the server has
+     * already sent this session always wins. Rows come from a file this mod
+     * wrote through the mapped-only ingress, so they are already mapped chunks.</p>
+     *
+     * @return true when anything changed and the maps need a repaint
+     */
+    public boolean restoreHistory(List<StoredValue> values, double baseline) {
+        if (Double.isFinite(baseline) && baseline > 0.0 && Double.isNaN(this.baseline)) {
+            setBaseline(baseline);
+        }
+        boolean changed = false;
+        for (StoredValue value : values) {
+            if (this.cache.putLastKnown(value.key(), value.value())) {
+                bumpRegion(value.key());
+                changed = true;
+            }
+        }
+        return changed;
     }
 
     public Optional<ConcentrationEntry> rawEntry(ChunkCacheKey key) {
@@ -148,21 +229,20 @@ public final class ClientConcentrationStore {
     }
 
     /**
-     * Marks entries that have aged out as expired and dirties their regions once.
+     * Demotes live values that have not been refreshed within
+     * {@code staleAfterTicks} and dirties their regions once.
      *
-     * <p>Without this a stale colour would stay painted for ever, because a region
-     * is only repainted when its data changes.</p>
+     * <p>Demotion is a visible change (bright to dim), so it has to trigger a
+     * repaint; the cache reports each entry only once, so a long-idle value does
+     * not repaint its region every sweep.</p>
      */
     public void expire(long staleAfterTicks) {
         for (ConcentrationCache.Snapshot snapshot : this.cache.snapshot()) {
-            ChunkCacheKey key = snapshot.key();
             ConcentrationEntry entry = snapshot.entry();
-            if (this.expired.contains(key)) {
-                continue;
-            }
-            if (entry.available() && !entry.fresh(this.tick, staleAfterTicks)) {
-                this.expired.add(key);
-                bumpRegion(key);
+            if (entry.available() && !entry.historical() && !entry.fresh(this.tick, staleAfterTicks)) {
+                if (this.cache.demote(snapshot.key())) {
+                    bumpRegion(snapshot.key());
+                }
             }
         }
     }
@@ -173,20 +253,6 @@ public final class ClientConcentrationStore {
      */
     public void markAllRegionsDirty() {
         this.dirtyRegions.addAll(this.regionVersions.keySet());
-    }
-
-    /**
-     * Drops entries older than {@code purgeAfterTicks} entirely, bounding memory
-     * in a long session. Entries are already hidden by {@link #expire} first, so
-     * no repaint is needed here.
-     */
-    public void purge(long purgeAfterTicks) {
-        for (ConcentrationCache.Snapshot snapshot : this.cache.snapshot()) {
-            if (this.tick - snapshot.entry().tick() > purgeAfterTicks) {
-                this.cache.remove(snapshot.key());
-                this.expired.remove(snapshot.key());
-            }
-        }
     }
 
     /** The current version of a region; 0 means this client never had data there. */
@@ -207,7 +273,7 @@ public final class ClientConcentrationStore {
         return drained;
     }
 
-    /** Regions that a highlighter should consider visited (used for regionHasHighlights). */
+    /** Whether a highlighter should consider this region as having data. */
     public boolean hasRegionData(RegionKey region) {
         return regionVersion(region) > 0;
     }
@@ -222,7 +288,6 @@ public final class ClientConcentrationStore {
         this.dirtyRegions.addAll(this.regionVersions.keySet());
         this.regionVersions.clear();
         this.cache.clear();
-        this.expired.clear();
         // The baseline belongs to the world, not to the dimension, so it survives
         // a dimension change; clearBaseline() is for world changes and disconnects.
     }

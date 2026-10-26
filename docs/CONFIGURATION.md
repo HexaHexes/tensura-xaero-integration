@@ -83,12 +83,24 @@ and this one is ignored for the rest of the session.
 
 | Key | Default | Effect |
 | --- | --- | --- |
-| `staleAfterTicks` | `600` | After this many client ticks without a refresh, a value stops painting and the hover line reports it unavailable instead of showing it as current. 600 ticks ≈ 30 s at 20 tps. |
-| `purgeAfterTicks` | `2400` | After this, the entry is dropped from memory entirely. Clamped up to at least `staleAfterTicks`. |
+| `staleAfterTicks` | `600` | How long a value counts as **current**. After this many client ticks without a refresh the chunk keeps its value but it becomes *last known*: drawn dimmer, and the hover line says so. 600 ticks ≈ 30 s at 20 tps. |
+| `historicalOpacityScale` | `0.45` | How bright a last-known value is drawn, as a fraction of its band's opacity. `0.0` keeps remembered values off the map entirely (they still answer the hover line); `1.0` draws them exactly as bright as a current value. |
 
-Staleness is what stops a chunk you walked away from from showing an old number
-as if it were live: the chunk unloads server-side, reconciliation reports it
-unavailable, and this TTL covers the gap before that answer arrives.
+This is the line between "the server says this is what it is now" and "this is
+what it was when I was last there". It is a display rule, not a data rule: the
+number is never discarded by it, only relabelled.
+
+### `[persistence]`
+
+| Key | Default | Effect |
+| --- | --- | --- |
+| `enabled` | `true` | Remember concentrations between sessions, per world, so chunks that are no longer loaded still show what was last observed there. |
+| `maxEntriesPerWorld` | `20000` | Most chunks remembered per world; bounds both the file and memory. Least recently seen chunks are dropped first. `0` disables remembering without touching the switch. |
+
+History lives in `<game directory>/tensura_xaero_integration/<world>-<hash>.bin`,
+separate per world and including every dimension. Only chunks your maps have
+mapped ever enter it, so replaying it cannot reveal anything your map did not
+already know. Deleting a file is safe: it is treated as "no history".
 
 ### `[subscription]`
 
@@ -153,3 +165,6 @@ the missing chunks simply never arrive.
 | Fewer packets | raise `minUpdateIntervalTicks`, raise `maxUpdatesPerPacket` |
 | Larger overlay area | raise client `radiusChunks` **and** server `maxSubscribeRadiusChunks` |
 | Hide the feature on a server | `sync.enabled = false` |
+| Remember less history | lower `persistence.maxEntriesPerWorld` |
+| Forget history entirely | delete the world file, or set `persistence.maxEntriesPerWorld = 0` |
+| Make old values fainter | lower `freshness.historicalOpacityScale` |

@@ -41,7 +41,9 @@ public final class ClientConfig {
     private static final ModConfigSpec.DoubleValue FALLBACK_BASELINE;
 
     private static final ModConfigSpec.IntValue STALE_AFTER_TICKS;
-    private static final ModConfigSpec.IntValue PURGE_AFTER_TICKS;
+    private static final ModConfigSpec.DoubleValue HISTORICAL_OPACITY_SCALE;
+    private static final ModConfigSpec.BooleanValue PERSISTENCE_ENABLED;
+    private static final ModConfigSpec.IntValue PERSISTED_ENTRIES_MAX;
 
     private static final ModConfigSpec.IntValue SUBSCRIBE_RADIUS_CHUNKS;
     private static final ModConfigSpec.IntValue SUBSCRIBE_INTERVAL_TICKS;
@@ -104,14 +106,28 @@ public final class ClientConfig {
 
         builder.push("freshness");
         STALE_AFTER_TICKS = builder
-                .comment("A value not refreshed within this many client ticks stops being drawn")
-                .comment("and the hover line reports it as unavailable instead of showing it as")
-                .comment("current. 600 ticks is 30 seconds at 20 tps.")
+                .comment("How long a value counts as current. After this many client ticks")
+                .comment("without a refresh the chunk keeps its last known value, drawn dimmer")
+                .comment("and labelled as last known, instead of pretending to be current.")
+                .comment("600 ticks is 30 seconds at 20 tps.")
                 .defineInRange("staleAfterTicks", 600, 20, 24000);
-        PURGE_AFTER_TICKS = builder
-                .comment("A value older than this is dropped from memory entirely. Must be at")
-                .comment("least staleAfterTicks.")
-                .defineInRange("purgeAfterTicks", 2400, 20, 240000);
+        HISTORICAL_OPACITY_SCALE = builder
+                .comment("Opacity multiplier for a last known value, relative to its band.")
+                .comment("0 hides remembered values on the map (they still answer the hover")
+                .comment("line), 1 draws them exactly as bright as a current value.")
+                .defineInRange("historicalOpacityScale", 0.45, 0.0, 1.0);
+        builder.pop();
+
+        builder.push("persistence");
+        PERSISTENCE_ENABLED = builder
+                .comment("Remember concentrations between sessions, per world, so chunks that")
+                .comment("are no longer loaded still show what was last observed there.")
+                .comment("Only values for chunks your maps have mapped are ever stored.")
+                .define("enabled", true);
+        PERSISTED_ENTRIES_MAX = builder
+                .comment("Most chunks remembered per world. Bounds both the file and memory;")
+                .comment("the least recently seen chunks are dropped first.")
+                .defineInRange("maxEntriesPerWorld", 20000, 0, 250000);
         builder.pop();
 
         builder.push("subscription");
@@ -168,8 +184,18 @@ public final class ClientConfig {
         return STALE_AFTER_TICKS.get();
     }
 
-    public static int purgeAfterTicks() {
-        return Math.max(STALE_AFTER_TICKS.get(), PURGE_AFTER_TICKS.get());
+    /** How bright a last-known value is drawn, as a fraction of its band's opacity. */
+    public static double historicalOpacityScale() {
+        return HISTORICAL_OPACITY_SCALE.get();
+    }
+
+    public static boolean persistenceEnabled() {
+        return PERSISTENCE_ENABLED.get();
+    }
+
+    /** Most chunks remembered per world, and therefore the in-memory capacity too. */
+    public static int persistedEntriesMax() {
+        return PERSISTED_ENTRIES_MAX.get();
     }
 
     public static int subscribeRadiusChunks() {

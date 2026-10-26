@@ -1,6 +1,8 @@
 {
   "tensura_xaero_integration.hover.line": "Magicule Concentration: %s \u2014 %s",
+  "tensura_xaero_integration.hover.line_last_known": "Magicule Concentration: %s \u2014 %s (last known)",
   "tensura_xaero_integration.hover.line_no_threshold": "Magicule Concentration: %s",
+  "tensura_xaero_integration.hover.line_no_threshold_last_known": "Magicule Concentration: %s (last known)",
   "tensura_xaero_integration.classification.normal": "Normal",
   "tensura_xaero_integration.classification.slightly_elevated": "Slightly Elevated",
   "tensura_xaero_integration.classification.moderately_elevated": "Moderately Elevated",

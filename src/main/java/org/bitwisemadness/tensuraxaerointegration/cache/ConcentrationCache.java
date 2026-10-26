@@ -65,6 +65,35 @@ public final class ConcentrationCache {
         return write(key, ConcentrationEntry.unavailable(tick));
     }
 
+    /**
+     * Demotes a live value to a remembered one, keeping the number but marking
+     * it as no longer current. Used when a chunk leaves the subscription range,
+     * unloads, or is replayed from disk.
+     *
+     * @return true when the entry changed, i.e. it was live and is now historical
+     */
+    public synchronized boolean demote(ChunkCacheKey key) {
+        ConcentrationEntry current = this.entries.get(key);
+        if (current == null || !current.available() || current.historical()) {
+            return false;
+        }
+        return write(key, ConcentrationEntry.lastKnown(current.value()));
+    }
+
+    /**
+     * Inserts a remembered value from disk without touching current data.
+     *
+     * <p>A value the server has already sent this session always wins, so a
+     * replayed file can never overwrite fresher information.</p>
+     */
+    public synchronized boolean putLastKnown(ChunkCacheKey key, double value) {
+        ConcentrationEntry current = this.entries.get(key);
+        if (current != null && !current.historical()) {
+            return false;
+        }
+        return write(key, ConcentrationEntry.lastKnown(value));
+    }
+
     private boolean write(ChunkCacheKey key, ConcentrationEntry next) {
         ConcentrationEntry current = this.entries.get(key);
         this.entries.put(key, next);
@@ -72,7 +101,10 @@ public final class ConcentrationCache {
     }
 
     private static boolean sameObservation(ConcentrationEntry a, ConcentrationEntry b) {
+        // `historical` is part of the observation: promoting or demoting a value
+        // changes how it is drawn, so it has to count as a change.
         return a.available() == b.available()
+                && a.historical() == b.historical()
                 && Double.compare(a.value(), b.value()) == 0;
     }
 

@@ -11,9 +11,12 @@ import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.level.Level;
+import net.neoforged.fml.loading.FMLPaths;
 import net.neoforged.neoforge.network.PacketDistributor;
 import org.bitwisemadness.tensuraxaerointegration.cache.ChunkCacheKey;
+import org.bitwisemadness.tensuraxaerointegration.cache.ConcentrationFileFormat;
 import org.bitwisemadness.tensuraxaerointegration.cache.RegionKey;
+import org.bitwisemadness.tensuraxaerointegration.client.ClientConcentrationStore.StoredValue;
 import org.bitwisemadness.tensuraxaerointegration.config.ClientConfig;
 import org.bitwisemadness.tensuraxaerointegration.net.ConcentrationPayload;
 import org.bitwisemadness.tensuraxaerointegration.net.PackedChunkPos;
@@ -47,9 +50,15 @@ public final class ClientConcentration {
      */
     private static final int RESYNC_INTERVAL_TICKS = 200;
 
-    private int lastResyncTick;
+    /** How often the remembered values are written to disk. */
+    private static final int SAVE_INTERVAL_TICKS = 600;
 
-    private final ClientConcentrationStore store = new ClientConcentrationStore(4096);
+    private int lastResyncTick;
+    private int lastSaveTick;
+
+    /** Created on first use, so no config value is read during class initialisation. */
+    private ClientConcentrationStore store;
+    private final ConcentrationStorage storage = new ConcentrationStorage(FMLPaths.GAMEDIR.get());
     private final Set<ChunkCacheKey> subscriptions = new LinkedHashSet<>();
 
     private String worldToken = "";
@@ -66,7 +75,12 @@ public final class ClientConcentration {
     }
 
     public ClientConcentrationStore store() {
-        return this.store;
+        ClientConcentrationStore current = this.store;
+        if (current == null) {
+            current = new ClientConcentrationStore(Math.max(1, ClientConfig.persistedEntriesMax()));
+            this.store = current;
+        }
+        return current;
     }
 
     /** The current world token, used to build cache keys. */
@@ -88,7 +102,7 @@ public final class ClientConcentration {
     /** Drives staleness, subscription diffing and map invalidation. */
     public void onClientTick(Minecraft minecraft) {
         if (minecraft.level == null || minecraft.player == null) {
-            if (!this.subscriptions.isEmpty() || this.store.size() > 0) {
+            if (!this.subscriptions.isEmpty() || store().size() > 0) {
                 resetSession();
             }
             return;
@@ -98,12 +112,15 @@ public final class ClientConcentration {
         if (!token.equals(this.worldToken) || !dimension.equals(this.dimensionId)) {
             beginSession(token, dimension);
         }
-        this.store.tick();
+        store().tick();
         this.ticks++;
 
         if (this.ticks % MAINTENANCE_INTERVAL_TICKS == 0) {
-            this.store.expire(ClientConfig.staleAfterTicks());
-            this.store.purge(ClientConfig.purgeAfterTicks());
+            store().expire(ClientConfig.staleAfterTicks());
+        }
+        if (this.ticks - this.lastSaveTick >= SAVE_INTERVAL_TICKS) {
+            this.lastSaveTick = this.ticks;
+            saveToDisk(this.worldToken, false);
         }
         if (this.subscribeRefreshDue || this.ticks - this.lastSubscribeTick >= ClientConfig.subscribeIntervalTicks()) {
             this.lastSubscribeTick = this.ticks;
@@ -144,22 +161,85 @@ public final class ClientConcentration {
             boolean mapped = isMapped(dimensionKey, chunkX, chunkZ);
             double value = values[i];
             if (Double.isNaN(value)) {
-                this.store.markUnavailable(key, mapped);
+                store().markUnavailable(key, mapped);
             } else {
-                this.store.offer(key, mapped, value);
+                store().offer(key, mapped, value);
             }
         }
     }
 
     /** Full reset: used on disconnect and world change. */
     public void resetSession() {
+        // Capture what was learned before the store is dropped.
+        saveToDisk(this.worldToken, true);
         this.subscriptions.clear();
-        this.store.clear();
-        this.store.clearBaseline();
+        store().clear();
+        store().clearBaseline();
         this.worldToken = "";
         this.dimensionId = "";
         this.lastSubscribeTick = 0;
         this.subscribeRefreshDue = true;
+    }
+
+    // --- persistence -------------------------------------------------------
+
+    /**
+     * Writes this world's remembered values.
+     *
+     * <p>Also stored is the baseline those values were classified against, so a
+     * replayed map is coloured the way it was when the values were observed. The
+     * server overwrites it on login.</p>
+     *
+     * @param synchronous true when a load follows immediately, so the write must
+     *                    be on disk before it runs
+     */
+    private void saveToDisk(String token, boolean synchronous) {
+        if (!ClientConfig.persistenceEnabled() || token == null || token.isBlank()) {
+            return;
+        }
+        List<StoredValue> stored = store().storedValues();
+        double baseline = store().baseline();
+        if (stored.isEmpty() && Double.isNaN(baseline)) {
+            return;
+        }
+        List<ConcentrationFileFormat.Row> rows = new ArrayList<>(stored.size());
+        for (StoredValue value : stored) {
+            ChunkCacheKey key = value.key();
+            rows.add(new ConcentrationFileFormat.Row(
+                    key.dimension(), key.chunkX(), key.chunkZ(), value.value()));
+        }
+        ConcentrationFileFormat.Contents contents = new ConcentrationFileFormat.Contents(baseline, rows);
+        if (synchronous) {
+            this.storage.saveNow(token, contents);
+        } else {
+            this.storage.saveAsync(token, contents);
+        }
+    }
+
+    /**
+     * Replays a world's remembered values.
+     *
+     * <p>Rows are trusted to be mapped chunks because only mapped values ever
+     * reach the store that wrote them, and Xaero does not un-map a chunk. They
+     * are loaded as last-known, so nothing here can masquerade as a live value.</p>
+     */
+    private void loadFromDisk(String token) {
+        if (!ClientConfig.persistenceEnabled() || token == null || token.isBlank()) {
+            return;
+        }
+        this.storage.load(token, ClientConfig.persistedEntriesMax()).ifPresent(contents -> {
+            List<StoredValue> values = new ArrayList<>(contents.rows().size());
+            for (ConcentrationFileFormat.Row row : contents.rows()) {
+                values.add(new StoredValue(
+                        new ChunkCacheKey(token, row.dimension(), row.chunkX(), row.chunkZ()), row.value()));
+            }
+            store().restoreHistory(values, contents.baseline());
+        });
+    }
+
+    /** Waits for a queued save; called after the logout save so nothing is lost. */
+    public void flushPersistence() {
+        this.storage.flush();
     }
 
     // --- subscription driving ----------------------------------------------
@@ -171,12 +251,18 @@ public final class ClientConcentration {
             // server holding chunks the client no longer shows.
             sendSubscriptions(false, this.dimensionId, this.subscriptions);
         }
+        // Persist the session being left before its values are dropped, so a
+        // dimension change does not discard what this world already taught us.
+        saveToDisk(this.worldToken, true);
         this.subscriptions.clear();
-        this.store.clear();
+        store().clear();
         if (newWorld) {
             // The baseline is per world; a dimension change keeps it.
-            this.store.clearBaseline();
+            store().clearBaseline();
         }
+        // Replay this world's remembered values. Live answers replace them within
+        // a tick or two for whatever the server currently has loaded.
+        loadFromDisk(token);
         this.worldToken = token;
         this.dimensionId = dimension;
         this.lastSubscribeTick = 0;
@@ -190,7 +276,7 @@ public final class ClientConcentration {
             if (!this.subscriptions.isEmpty()) {
                 sendSubscriptions(false, this.dimensionId, this.subscriptions);
                 this.subscriptions.clear();
-                this.store.clear();
+                store().clear();
             }
             return;
         }
@@ -230,7 +316,9 @@ public final class ClientConcentration {
         if (!removed.isEmpty()) {
             sendSubscriptions(false, this.dimensionId, removed);
             for (ChunkCacheKey key : removed) {
-                this.store.forget(key);
+                // Out of request range is not out of memory: the value becomes
+                // last-known rather than disappearing.
+                store().demote(key);
             }
         }
         this.subscriptions.clear();
@@ -283,7 +371,7 @@ public final class ClientConcentration {
     // --- map invalidation ---------------------------------------------------
 
     private void refreshDirtyRegions() {
-        Set<RegionKey> dirty = this.store.drainDirtyRegions();
+        Set<RegionKey> dirty = store().drainDirtyRegions();
         if (dirty.isEmpty()) {
             return;
         }

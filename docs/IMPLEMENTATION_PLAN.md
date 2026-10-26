@@ -116,7 +116,27 @@ Depends on: Phase 6.
 Acceptance: `./gradlew build` and `./gradlew runGameTestServer` pass locally; no
 generated output, IDE state, secrets or third-party jars are staged. — met.
 
-## Phase 8 — Publish ⏳
+## Phase 8 — Last-known persistence ✅
+
+Depends on: Phase 5, Phase 6.
+
+- [x] `cache/ConcentrationFileFormat`: strict binary codec for one world's values.
+- [x] `client/ConcentrationStorage`: per-world file, atomic save, daemon writer, corruption tolerated.
+- [x] `ClientConcentrationStore`: `live` / `last known` states, demotion on unsubscribe and
+      unavailability, replay that never overwrites live data.
+- [x] Session hooks: save on dimension change, world change and logout; replay on join;
+      30-second periodic save.
+- [x] Dimmed overlay for last-known values plus a `(last known)` hover line.
+- [x] Config: `freshness.historicalOpacityScale`, `[persistence] enabled`,
+      `maxEntriesPerWorld`; `freshness.purgeAfterTicks` removed.
+- [x] JUnit coverage: codec, file store, store states (102 tests total).
+
+Acceptance: `./gradlew build` and `./gradlew runGameTestServer` pass; a chunk that
+unloads keeps a dimmed last-known tint and a labelled hover line rather than
+disappearing or pretending to be current. — build and tests met; the client-side
+dimming is part of the manual pass in `docs/TESTING.md` rows 14 and 17.
+
+## Phase 9 — Publish ⏳
 
 Depends on: Phase 7 and explicit user go-ahead.
 

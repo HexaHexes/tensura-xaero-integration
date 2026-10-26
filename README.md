@@ -32,20 +32,26 @@ present, the overlay appears on the chunks you have explored.
 Each map is independent — the overlay works with only the minimap, only the world
 map, or both — and the mod does nothing at all if Tensura is not installed.
 
-## Why some explored chunks stay blank
+## What your map remembers
 
 Tensura only holds a concentration value for chunks the server currently has
-loaded. Once you travel away and a chunk unloads, there is no authoritative value
-left to show, and this addon will not invent one. So the overlay covers the area
-around you rather than your entire explored history, and a value that stops being
-refreshed fades out instead of showing a stale number.
+loaded. Rather than dropping the rest, this addon remembers the last value it saw
+for every chunk you have mapped: when a chunk unloads or you travel away, its
+overlay stays but fades, and hovering says `(last known)` instead of passing an
+old number off as a current one. Walk back and it brightens again as soon as the
+server can answer for it.
+
+That history is stored in your own game folder, one file per world, and only
+ever contains chunks your maps had already explored. Deleting it is harmless —
+the maps simply go blank outside the loaded area again.
 
 ## Configuration
 
 Two config files, both optional to touch:
 
 - **Client** — which overlays and hover are on, the band thresholds, colours and
-  opacity, and how far around you data is requested.
+  opacity, how bright last-known values are, how much history to remember, and how
+  far around you data is requested.
 - **Server** — a master switch for sending concentration at all, per-player caps,
   the distance limit, and how much work reconciliation may spend per cycle.
 
@@ -64,7 +70,7 @@ documented in [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md).
 
 ## Known limitations
 
-- Only the area the server still has loaded has values (see above).
+- Only the area the server still has loaded has *live* values; everything else shows what was last observed there (see above).
 - The bands (*Slightly / Moderately / Highly / Exceptionally Elevated*) are display
   bands relative to Tensura's baseline. Tensura itself has no named tiers, so these
   are a reading aid, not a game rule.

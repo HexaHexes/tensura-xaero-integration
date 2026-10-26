@@ -93,8 +93,9 @@ Every call is wrapped so a rename degrades to "no data" instead of a crash.
 
 | Limitation | Cause |
 | --- | --- |
-| Far-away mapped chunks show no overlay and no hover number | Tensura only has a value for a loaded chunk, and this mod never loads or generates one. The map remembers terrain the server has forgotten. |
-| Very large mapped areas are covered only near the player | the server answers within `maxSubscribeRadiusChunks`; there is no bulk history API |
+| Far-away mapped chunks show only their **last known** value, dimmer, and never update while unloaded | Tensura has no value for an unloaded chunk and this mod never loads or generates one; the remembered observation is the newest thing that existed |
+| Live coverage is limited to the area around the player | the server answers within `maxSubscribeRadiusChunks`; there is no bulk history API. Everything else comes from the client's per-world history file. |
+| Remembered values are as old as the last visit | by construction: they are real observations from when the chunk was loaded, never extrapolated forward |
 | Overlay is per-chunk, not per-block | Tensura's stored value is per chunk; per-block modifiers exist only for a specific position query |
 | Minimap hover text is not implemented | only world-map hover was specified; the minimap highlighter implements its tooltip hook as a no-op |
 | Xaero overlay registration relies on one mixin per map | neither mod offers a third-party registration call in the pinned versions |
