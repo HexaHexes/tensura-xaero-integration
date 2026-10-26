@@ -291,7 +291,9 @@ and colour, so the two maps can never disagree:
   last built and returns it while the value, its liveness and its band are unchanged:
   a still hover does no number formatting and builds no component graph. The
   remembered line is a translatable component, so a language reload still takes
-  effect.
+  effect. The read behind it is `rawEntryOrNull`, the immutable cache entry, rather
+  than `observe` - a hovered chunk is asked about on every frame, and the three fields
+  the line needs are already on the entry, so the frame allocates nothing.
 
 Constructors pass `coveringOutsideDiscovered = false`, so Xaero's own discovered
 gate is an additional outer barrier for anything this code might miss.

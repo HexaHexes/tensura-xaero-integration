@@ -47,6 +47,11 @@ separately below.
   Xaero's `getChunkHighlitColor` copies those five entries into its own result store
   before returning, and per thread because the map's render and writer threads both
   ask.
+- **The hover path allocates nothing per frame either.** `HoverText.describe` runs on
+  every map frame and still went through `observe`, paying an `Optional` for the entry,
+  an `Observation` and another `Optional` for the band on each frame. It now reads the
+  immutable entry (`rawEntryOrNull`) and takes the number, band and liveness straight
+  off it, so a hover frame allocates nothing at all once its line is remembered.
 - **The hover line is built once, not once per frame.** `HoverText.describe` runs on
   every map frame for the block under the cursor, and each call ran a `String.format`
   for the number plus two `Component.translatable` nodes - the same three results

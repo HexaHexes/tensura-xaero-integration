@@ -296,16 +296,27 @@ public final class ClientConcentrationStore {
      * recently, otherwise the last known value. Empty when nothing is held.
      */
     public Optional<Observation> observe(ChunkCacheKey key, long windowMillis) {
-        Optional<ConcentrationEntry> entry = this.cache.entry(key);
-        if (entry.isEmpty() || !entry.get().available()) {
+        ConcentrationEntry entry = rawEntryOrNull(key);
+        if (entry == null || !entry.available()) {
             return Optional.empty();
         }
-        ConcentrationEntry value = entry.get();
-        boolean live = value.fresh(now(), windowMillis);
+        boolean live = entry.fresh(now(), windowMillis);
         // The band is the server's, never recomputed here: it owns the tier table.
         Optional<ConcentrationClassification> classification =
-                ConcentrationClassification.fromCode(value.band());
-        return Optional.of(new Observation(value.value(), classification, live));
+                ConcentrationClassification.fromCode(entry.band());
+        return Optional.of(new Observation(entry.value(), classification, live));
+    }
+
+    /**
+     * The stored entry for a chunk, or {@code null} when there is none.
+     *
+     * <p>The allocation-free read behind {@link #observe}: the hover line asks for
+     * a chunk on every map frame and needs the number, the band and the liveness,
+     * none of which requires an {@code Optional} or an {@link Observation}. The
+     * entry is immutable; never write through it.</p>
+     */
+    public ConcentrationEntry rawEntryOrNull(ChunkCacheKey key) {
+        return this.cache.entryOrNull(key);
     }
 
     /**

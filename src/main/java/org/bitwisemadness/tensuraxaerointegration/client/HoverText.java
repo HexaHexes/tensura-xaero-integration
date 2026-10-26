@@ -1,9 +1,8 @@
 package org.bitwisemadness.tensuraxaerointegration.client;
 
-import java.util.Optional;
 import net.minecraft.network.chat.Component;
 import org.bitwisemadness.tensuraxaerointegration.cache.ChunkCacheKey;
-import org.bitwisemadness.tensuraxaerointegration.client.ClientConcentrationStore.Observation;
+import org.bitwisemadness.tensuraxaerointegration.cache.ConcentrationEntry;
 import org.bitwisemadness.tensuraxaerointegration.concentration.ConcentrationClassification;
 import org.bitwisemadness.tensuraxaerointegration.util.ConcentrationText;
 
@@ -40,25 +39,30 @@ public final class HoverText {
         String token = ClientConcentration.get().worldToken();
         ChunkCacheKey key = LAST_LINE.keyFor(token.isBlank() ? "unknown" : token, dimensionId, chunkX, chunkZ);
 
-        Optional<Observation> observation = store.observe(key, store.staleAfterMillis());
-        if (observation.isEmpty()) {
+        // Read the entry rather than building an Observation: this runs on every
+        // map frame, and the three fields the line needs are already on it.
+        ConcentrationEntry entry = store.rawEntryOrNull(key);
+        if (entry == null || !entry.available()) {
             return null;
         }
-        return LAST_LINE.line(observation.get());
+        return LAST_LINE.line(
+                entry.value(),
+                entry.fresh(store.now(), store.staleAfterMillis()),
+                ConcentrationClassification.byCode(entry.band()));
     }
 
-    private static Component build(Observation value, ConcentrationClassification band) {
-        String formatted = ConcentrationText.format(value.value());
+    private static Component build(double value, boolean live, ConcentrationClassification band) {
+        String formatted = ConcentrationText.format(value);
         if (band != null) {
             return Component.translatable(
-                    value.live()
+                    live
                             ? "tensura_xaero_integration.hover.line"
                             : "tensura_xaero_integration.hover.line_last_known",
                     formatted, Component.translatable(band.translationKey()));
         }
         // No usable baseline: report the number, never invent a band for it.
         return Component.translatable(
-                value.live()
+                live
                         ? "tensura_xaero_integration.hover.line_no_threshold"
                         : "tensura_xaero_integration.hover.line_no_threshold_last_known",
                 formatted);
@@ -93,15 +97,12 @@ public final class HoverText {
         }
 
         /** The line for an observation, formatted only when it differs from the last. */
-        Component line(Observation observation) {
-            double observed = observation.value();
-            boolean isLive = observation.live();
-            ConcentrationClassification observedBand = observation.classification().orElse(null);
+        Component line(double observed, boolean isLive, ConcentrationClassification observedBand) {
             if (this.line != null && Double.compare(this.value, observed) == 0
                     && this.live == isLive && this.band == observedBand) {
                 return this.line;
             }
-            Component built = build(observation, observedBand);
+            Component built = build(observed, isLive, observedBand);
             // NaN can never equal a real observation, so the first call always builds.
             this.value = observed;
             this.live = isLive;
