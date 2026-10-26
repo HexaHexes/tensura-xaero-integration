@@ -25,6 +25,7 @@ import org.bitwisemadness.tensuraxaerointegration.config.ClientConfig;
 import org.bitwisemadness.tensuraxaerointegration.net.ConcentrationPayload;
 import org.bitwisemadness.tensuraxaerointegration.net.PackedChunkPos;
 import org.bitwisemadness.tensuraxaerointegration.net.SubscriptionPayload;
+import org.bitwisemadness.tensuraxaerointegration.util.ChunkRadius;
 
 /**
  * Client-side session: owns the display store, decides which chunks to ask for,
@@ -339,28 +340,34 @@ public final class ClientConcentration {
         if (minecraft.getConnection() == null) {
             return;
         }
+        int radius = ClientConfig.subscribeRadiusChunks();
+        int centerX = minecraft.player.chunkPosition().x;
+        int centerZ = minecraft.player.chunkPosition().z;
         Set<Long> mapped = mappedChunksNearby(minecraft);
         String token = this.worldToken.isBlank() ? "unknown" : this.worldToken;
         Set<ChunkCacheKey> wanted = new LinkedHashSet<>();
         for (long packed : mapped) {
-            ChunkCacheKey key = new ChunkCacheKey(token, this.dimensionId,
-                    PackedChunkPos.unpackX(packed), PackedChunkPos.unpackZ(packed));
+            int chunkX = PackedChunkPos.unpackX(packed);
+            int chunkZ = PackedChunkPos.unpackZ(packed);
+            // A straight-line radius, not the square the maps enumerate: a corner
+            // of a square of radius 10 is 14.1 chunks away, past anything the
+            // server has loaded, so asking for it only earns a "no value".
+            if (!ChunkRadius.within(chunkX, chunkZ, centerX, centerZ, radius)) {
+                continue;
+            }
+            ChunkCacheKey key = new ChunkCacheKey(token, this.dimensionId, chunkX, chunkZ);
             wanted.add(key);
             this.mappedTicks.put(key, this.ticks);
         }
         // Keep what the maps reported a moment ago: Xaero's mapped query reads the
         // regions it currently holds, and an eviction there is not an un-mapping.
-        int radius = ClientConfig.subscribeRadiusChunks();
-        int centerX = minecraft.player.chunkPosition().x;
-        int centerZ = minecraft.player.chunkPosition().z;
         Iterator<Map.Entry<ChunkCacheKey, Integer>> remembered = this.mappedTicks.entrySet().iterator();
         while (remembered.hasNext()) {
             Map.Entry<ChunkCacheKey, Integer> entry = remembered.next();
             ChunkCacheKey key = entry.getKey();
             boolean expired = this.ticks - entry.getValue() > MAPPED_MEMORY_TICKS;
             boolean elsewhere = !key.dimension().equals(this.dimensionId) || !key.world().equals(token);
-            boolean tooFar = Math.abs(key.chunkX() - centerX) > radius
-                    || Math.abs(key.chunkZ() - centerZ) > radius;
+            boolean tooFar = !ChunkRadius.within(key.chunkX(), key.chunkZ(), centerX, centerZ, radius);
             if (expired || elsewhere || tooFar) {
                 remembered.remove();
             } else {

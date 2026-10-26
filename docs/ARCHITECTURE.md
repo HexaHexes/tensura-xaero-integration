@@ -119,11 +119,10 @@ Responsibilities:
   costs a few hundred field reads every few seconds rather than a stall.
 - **Unloaded chunks.** `offerCurrent` reports a chunk that is no longer loaded as
   unavailable (`NaN`) instead of letting its last value live on, and says once per
-  session why it could not read one: no loaded chunk there (expected at the
-  corners of a square request radius that reaches past the view distance), or a
-  loaded chunk from which Tensura returned no storage or no usable value (an
-  integration fault). The client sees the same `NaN` either way, so only the
-  server can draw that distinction.
+  session why it could not read one: no loaded chunk there (the player's loaded
+  area moved, or the chunk is at the edge of it), or a loaded chunk from which
+  Tensura returned no storage or no usable value (an integration fault). The client
+  sees the same `NaN` either way, so only the server can draw that distinction.
 - **Privacy.** Nothing is ever sent for a chunk the player did not subscribe to,
   and subscriptions are additionally bounded by distance and loaded state, so a
   modified client can only reach chunks it is physically standing among.
@@ -168,6 +167,13 @@ The mapped set is built from `WorldMapBridge.mappedChunks(...)` and
 `MinimapBridge.mappedChunks(...)` — the maps' own mapped state, intersected with
 the configured radius around the player. A chunk that is not mapped is never
 requested.
+
+The radius is circular (`util/ChunkRadius`, shared with the server's cap and its
+subscription pruning). The maps enumerate a square, so corners are filtered out:
+the corner of a square of radius 10 is 14.1 chunks away, and a server only holds
+chunks loaded out to about its view distance, so those corners could only ever be
+answered with `NaN`. A cube of requests for data that cannot exist is what made
+unreadable chunks show up in the first place.
 
 Xaero answers that query from the layers and regions it **currently holds in
 memory**, so an eviction or a cave-layer change makes chunks that are still mapped
@@ -291,6 +297,7 @@ world-map-only install loads only what exists.
 | `refresh/UpdateQueue` | change detection, per-chunk minimum interval, heartbeat re-queue, bounded drain, retention pruning |
 | `refresh/ReconcileCursor` | rotating bounded slice over a set |
 | `refresh/CadenceEstimate` | measured confirmation promise: worst recent sweep, floored at nominal and capped |
+| `util/ChunkRadius` | the circular request radius, shared by the client's request and the server's cap |
 | `cache/ConcentrationFileFormat` | strict binary codec for the persisted last-known values |
 | `client/ClientConcentrationStore` | mapped-only ingress, live/last-known states, replay, region versions |
 

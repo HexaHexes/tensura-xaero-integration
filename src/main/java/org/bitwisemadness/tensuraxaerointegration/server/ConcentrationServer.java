@@ -32,6 +32,7 @@ import org.bitwisemadness.tensuraxaerointegration.refresh.ReconcileCursor;
 import org.bitwisemadness.tensuraxaerointegration.refresh.UpdateQueue;
 import org.bitwisemadness.tensuraxaerointegration.tensura.TensuraBridge;
 import org.bitwisemadness.tensuraxaerointegration.tiers.DimensionTier;
+import org.bitwisemadness.tensuraxaerointegration.util.ChunkRadius;
 import org.bitwisemadness.tensuraxaerointegration.tiers.MagiculeTiers;
 
 /**
@@ -175,7 +176,7 @@ public final class ConcentrationServer {
             for (long packed : chunks) {
                 int chunkX = PackedChunkPos.unpackX(packed);
                 int chunkZ = PackedChunkPos.unpackZ(packed);
-                if (!withinRadius(chunkX, chunkZ, playerChunkX, playerChunkZ, radius)) {
+                if (!ChunkRadius.within(chunkX, chunkZ, playerChunkX, playerChunkZ, radius)) {
                     continue;
                 }
                 ChunkCacheKey key = key(level, chunkX, chunkZ);
@@ -411,9 +412,9 @@ public final class ConcentrationServer {
      * <p>The client only ever sees "no value", which is the same packet whether
      * the chunk is outside the server's loaded area or the chunk is loaded and
      * Tensura still answered nothing. Those are different problems - the first is
-     * expected at the corners of a square subscription radius that reaches past
-     * the view distance, the second is an integration fault - and only the server
-     * can tell them apart, because it is the side that knows what it has loaded.</p>
+     * expected as the loaded area moves, the second is an integration fault - and
+     * only the server can tell them apart, because it is the side that knows what
+     * it has loaded.</p>
      */
     private OptionalDouble readFor(ServerLevel level, ChunkCacheKey key) {
         OptionalDouble value = TensuraBridge.read(level, key.chunkX(), key.chunkZ());
@@ -437,7 +438,7 @@ public final class ConcentrationServer {
                 "Chunk {},{} could not be read: {}; the client keeps its last known value",
                 key.chunkX(), key.chunkZ(), loaded
                         ? "the chunk is loaded but Tensura returned no storage or no usable value"
-                        : "the server has no loaded chunk there, which the square request radius reaches");
+                        : "the server has no loaded chunk there");
     }
 
     /**
@@ -497,7 +498,7 @@ public final class ConcentrationServer {
         while (iterator.hasNext()) {
             ChunkCacheKey key = iterator.next();
             boolean otherDimension = !key.dimension().equals(state.dimension);
-            boolean tooFar = !withinRadius(key.chunkX(), key.chunkZ(), playerChunkX, playerChunkZ, radius);
+            boolean tooFar = !ChunkRadius.within(key.chunkX(), key.chunkZ(), playerChunkX, playerChunkZ, radius);
             if (otherDimension || tooFar) {
                 iterator.remove();
             }
@@ -509,10 +510,6 @@ public final class ConcentrationServer {
 
     private ChunkCacheKey key(ServerLevel level, int chunkX, int chunkZ) {
         return new ChunkCacheKey(this.worldToken, level.dimension().location().toString(), chunkX, chunkZ);
-    }
-
-    private static boolean withinRadius(int chunkX, int chunkZ, int centerX, int centerZ, int radius) {
-        return Math.abs(chunkX - centerX) <= radius && Math.abs(chunkZ - centerZ) <= radius;
     }
 
     private static double readOrNaN(OptionalDouble value) {

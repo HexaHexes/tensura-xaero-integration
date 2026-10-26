@@ -116,7 +116,7 @@ already know. Deleting a file is safe: it is treated as "no history".
 
 | Key | Default | Effect |
 | --- | --- | --- |
-| `radiusChunks` | `10` | Radius around the player for which **mapped** chunks are requested. |
+| `radiusChunks` | `10` | Radius around the player for which **mapped** chunks are requested, in a straight line. |
 | `intervalTicks` | `20` | How often the mapped set is recomputed and sent. |
 | `batchSize` | `256` | Chunk entries per subscription packet. |
 
@@ -124,6 +124,13 @@ Only chunks the map says are mapped inside this radius are requested, so the
 mapped-chunk rule is enforced before a byte leaves the client. The server applies
 its own, independent radius cap — if the server's cap is smaller than this value,
 the missing chunks simply never arrive.
+
+The radius is a **circle, not a square**. This matters more than it sounds: the
+corners of a square of radius 10 are 14.1 chunks from the player, and a server
+only holds chunks loaded out to roughly its view distance, so those corners are
+chunks it has no data for at all. Every one of them could only ever be answered
+with "no value", which arrives as a chunk going last known for no reason the
+player can see. A circular radius asks only for what is plausibly loaded.
 
 ---
 
@@ -232,7 +239,7 @@ which is exactly the knob this datapack provides.
 | Key | Default | Effect |
 | --- | --- | --- |
 | `maxSubscribedChunksPerPlayer` | `2048` | Cap on one player's subscription set; bounds both bookkeeping and what a client can hold. |
-| `maxSubscribeRadiusChunks` | `16` | Largest distance in chunks between player and an answerable chunk. The hard limit that keeps a modified client from probing chunks it is not standing among. Must be at least the client's `radiusChunks` or nothing is sent. |
+| `maxSubscribeRadiusChunks` | `16` | Largest distance in chunks, measured in a straight line, between player and an answerable chunk. The hard limit that keeps a modified client from probing chunks it is not standing among. Must be at least the client's `radiusChunks` or nothing is sent. |
 | `minSubscribePacketIntervalTicks` | `5` | Minimum ticks between two subscription packets from one player. |
 
 ### `[refresh]`

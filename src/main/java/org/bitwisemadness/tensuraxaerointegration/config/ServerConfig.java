@@ -46,9 +46,9 @@ public final class ServerConfig {
                 .defineInRange("maxSubscribedChunksPerPlayer", 2048, 1, 65536);
         MAX_SUBSCRIBE_RADIUS_CHUNKS = builder
                 .comment("Largest distance, in chunks, between the player and a chunk the server")
-                .comment("will answer for. This is the hard limit that keeps a client from probing")
-                .comment("chunks it is not standing among; it must be at least the client's")
-                .comment("subscription radius or nothing is ever sent.")
+                .comment("will answer for, measured in a straight line. This is the hard limit that")
+                .comment("keeps a client from probing chunks it is not standing among; it must be at")
+                .comment("least the client's subscription radius or nothing is ever sent.")
                 .defineInRange("maxSubscribeRadiusChunks", 16, 1, 64);
         MIN_SUBSCRIBE_PACKET_INTERVAL_TICKS = builder
                 .comment("Minimum ticks between two subscription packets from one player.")

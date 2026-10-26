@@ -4,6 +4,28 @@ All notable changes to this project. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses
 semantic versioning with pre-release suffixes.
 
+## [0.1.0-alpha.11] — 2026-10-26
+
+The request area is a circle instead of a square.
+
+### Fixed
+
+- **The client asked about chunks the server could never answer for.** The request
+  radius was a square: its corners sit 14.1 chunks from the player at
+  `radiusChunks = 10`, further than a server holds chunks loaded. Every corner chunk
+  therefore came back as "no value" and showed as last known, which is one of the
+  ways a normal, loaded area looked broken. `util/ChunkRadius` now measures in a
+  straight line, and the server's `maxSubscribeRadiusChunks` cap and its pruning use
+  the same predicate, so the two sides mean the same thing by "in range".
+- Which also removes most of the traffic that produced the unreadable-chunk line:
+  at radius 10 the request set drops from 441 chunks to 317.
+
+### Changed
+
+- The server's unreadable-chunk notice no longer blames a square radius that no
+  longer exists: a chunk it cannot read is either outside its loaded area or a
+  loaded chunk Tensura answered nothing for.
+
 ## [0.1.0-alpha.10] — 2026-10-26
 
 The window follows the server through its own stalls, and an unreadable chunk now

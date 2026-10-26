@@ -98,8 +98,10 @@ public final class ClientConfig {
         builder.push("subscription");
         SUBSCRIBE_RADIUS_CHUNKS = builder
                 .comment("Radius in chunks around the player for which mapped chunks are")
-                .comment("requested. The server caps this independently and only answers for")
-                .comment("chunks it currently has loaded.")
+                .comment("requested. Measured in a straight line, not as a square: a square's")
+                .comment("corners reach 1.4 times the radius, further than the server has")
+                .comment("chunks loaded. The server caps this independently and only answers")
+                .comment("for chunks it currently has loaded.")
                 .defineInRange("radiusChunks", 10, 1, 32);
         SUBSCRIBE_INTERVAL_TICKS = builder
                 .comment("How often the mapped-chunk set is recomputed and sent.")
