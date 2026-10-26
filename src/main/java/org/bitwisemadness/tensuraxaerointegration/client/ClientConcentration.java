@@ -241,8 +241,10 @@ public final class ClientConcentration {
 
     /** Full reset: used on disconnect and world change. */
     public void resetSession() {
-        // Capture what was learned before the store is dropped.
-        saveToDisk(this.worldToken, true);
+        // Capture what was learned before the store is dropped. Queued, not
+        // written here: nothing loads this token afterwards, and a disconnect must
+        // not wait on the disk.
+        saveToDisk(this.worldToken, false);
         this.subscriptions.clear();
         store().clear();
         store().clearServerInfo();
@@ -269,10 +271,10 @@ public final class ClientConcentration {
      * coloured the way it was when the values were observed rather than against
      * whatever tiers the datapack holds today.</p>
      *
-     * @param synchronous true when a load follows immediately, so the write must
-     *                    be on disk before it runs
+     * @param visibleToTheNextLoad true when a load of the same world follows
+     *                             immediately and the file must be current for it
      */
-    private void saveToDisk(String token, boolean synchronous) {
+    private void saveToDisk(String token, boolean visibleToTheNextLoad) {
         if (!ClientConfig.persistenceEnabled() || token == null || token.isBlank()) {
             return;
         }
@@ -287,8 +289,14 @@ public final class ClientConcentration {
                     key.dimension(), key.chunkX(), key.chunkZ(), value.value(), value.band()));
         }
         ConcentrationFileFormat.Contents contents = new ConcentrationFileFormat.Contents(rows);
-        if (synchronous) {
-            this.storage.saveNow(token, contents);
+        if (visibleToTheNextLoad) {
+            // Bounded wait: the load that follows needs this file current, but a
+            // slow disk must not freeze the client while it catches up.
+            if (!this.storage.saveAndWait(token, contents, ConcentrationStorage.WRITE_TIMEOUT_MILLIS)) {
+                TensuraXaeroIntegration.LOGGER.debug(
+                        "Concentration history for {} was still being written when the next session loaded it",
+                        token);
+            }
         } else {
             this.storage.saveAsync(token, contents);
         }
@@ -316,7 +324,11 @@ public final class ClientConcentration {
         });
     }
 
-    /** Waits for a queued save; called after the logout save so nothing is lost. */
+    /**
+     * Waits briefly for queued saves; called after the logout save so the last
+     * snapshot usually lands. A write that misses the deadline finishes on the
+     * writer thread instead of holding the client.
+     */
     public void flushPersistence() {
         this.storage.flush();
     }

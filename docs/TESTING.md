@@ -68,7 +68,7 @@ Minecraft-free classes.
 | `client/ClientConcentrationStoreTest` | mapped-only ingress (an unmapped chunk cannot be stored even when offered), server-supplied bands (including an unbanded value), live→last-known demotion and promotion, the wall-clock freshness window derived from the server's measured cadence (including a stalled server), stale/unavailable handling, replay that never overwrites live data and keeps the stored band, region version bumps on visible changes only, `clearServerInfo` — all on an injected clock, so no test sleeps |
 | `tiers/TierParserTest` | datapack schema: baseline-only and per-dimension ladders, multiple dimensions per file, palette files, partial or non-increasing ladders rejected, unlisted dimensions falling back, unclassifiable dimensions, broken files skipped without emptying the table |
 | `cache/ConcentrationFileFormatTest` | write/read round trip, empty file, wrong magic, unknown version (incl. a version-1 file), row limit, negative count, non-finite value, impossible band code, truncation, invalid row construction |
-| `client/ConcentrationStorageTest` | save and load a world, queued save plus flush, missing and corrupt files read as no history, per-world name uniqueness and sanitising (no path escape) |
+| `client/ConcentrationStorageTest` | save and load a world, queued save plus flush, a save that must be visible before it returns, a zero-deadline flush, missing and corrupt files read as no history, per-world name uniqueness and sanitising (no path escape) |
 | `net/PackedChunkPosTest` | packing/unpacking incl. negative and extreme coordinates |
 | `util/ConcentrationTextTest` | hover line formatting, number precision, with and without a classification, unavailable state |
 

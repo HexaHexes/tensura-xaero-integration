@@ -12,6 +12,7 @@ import java.util.Optional;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import org.bitwisemadness.tensuraxaerointegration.cache.ConcentrationFileFormat;
@@ -38,6 +39,17 @@ public final class ConcentrationStorage {
 
     /** Folder name under the game directory. */
     public static final String FOLDER = "tensura_xaero_integration";
+
+    /**
+     * How long the client thread will wait for the writer, at most.
+     *
+     * <p>A save is one bounded file written by a daemon thread, so this is a
+     * ceiling for the two places that need a write to be visible - a session
+     * change that immediately reloads the world, and logout - not a typical wait.
+     * It used to be five seconds, which froze the client behind a disk that had
+     * fallen behind. A write that exceeds it still completes in the background.</p>
+     */
+    public static final long WRITE_TIMEOUT_MILLIS = 250L;
 
     private static final Logger LOGGER = LoggerFactory.getLogger("tensura_xaero_integration/storage");
 
@@ -88,11 +100,18 @@ public final class ConcentrationStorage {
     }
 
     /**
-     * Saves inline. Used when the session is ending or changing and the write
-     * must be visible to the load that follows immediately after it.
+     * Queues a save and waits for it, up to {@code timeoutMillis}.
+     *
+     * <p>For the session change that saves the world it is leaving and immediately
+     * loads it again for the new dimension: the file has to be current when the
+     * load runs. A write that misses the deadline keeps going on the writer thread,
+     * and the caller loads whatever is on disk at that moment.</p>
+     *
+     * @return true when the write landed within the deadline
      */
-    public void saveNow(String worldToken, ConcentrationFileFormat.Contents contents) {
-        write(fileFor(worldToken), contents);
+    public boolean saveAndWait(String worldToken, ConcentrationFileFormat.Contents contents,
+            long timeoutMillis) {
+        return await(this.writer.submit(() -> write(fileFor(worldToken), contents)), timeoutMillis);
     }
 
     /** Reads a world's history, or empty when there is none or it cannot be read. */
@@ -114,12 +133,34 @@ public final class ConcentrationStorage {
      * session can keep saving. Called after the session's final save.
      */
     public void flush() {
+        flush(WRITE_TIMEOUT_MILLIS);
+    }
+
+    /**
+     * Waits up to {@code timeoutMillis} for everything already queued to land.
+     *
+     * <p>The single writer thread means a barrier task stands for every write
+     * queued before it, so one wait covers them all.</p>
+     */
+    public void flush(long timeoutMillis) {
+        await(this.writer.submit(() -> { }), timeoutMillis);
+    }
+
+    /** Waits for a writer task, reporting rather than throwing when it is late. */
+    private static boolean await(Future<?> task, long timeoutMillis) {
         try {
-            this.writer.submit(() -> { }).get(5, TimeUnit.SECONDS);
+            task.get(Math.max(0L, timeoutMillis), TimeUnit.MILLISECONDS);
+            return true;
+        } catch (TimeoutException late) {
+            LOGGER.debug("Concentration history write is still running after {} ms; it will finish on the writer thread",
+                    timeoutMillis);
+            return false;
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
-        } catch (ExecutionException | TimeoutException e) {
-            LOGGER.warn("Concentration history write did not finish: {}", e.toString());
+            return false;
+        } catch (ExecutionException failure) {
+            // write() has already logged what went wrong.
+            return false;
         }
     }
 

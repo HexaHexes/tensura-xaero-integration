@@ -39,6 +39,13 @@ and stop fighting over one lock.
 - The cadence estimate and its last sample survived a server restart, so the first
   sweep of a second world in the same process was timed against the previous
   world's then widened the client's window for fifteen sweeps.
+- **Logout no longer freezes behind the concentration save.** The final save was
+  written inline on the client thread and then waited on for up to five seconds.
+  It is queued like every other save, and the wait is bounded at 250 ms
+  (`ConcentrationStorage.WRITE_TIMEOUT_MILLIS`); a write that misses the deadline
+  finishes on the writer thread instead. The one place that genuinely needs the
+  file current - a session change that reloads the world immediately - waits on
+  its own write with the same bound.
 
 ## [0.1.0-alpha.11] — 2026-10-26
 

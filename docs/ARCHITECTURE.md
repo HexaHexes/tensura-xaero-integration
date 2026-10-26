@@ -215,11 +215,15 @@ stays unavailable.
 Per-world file store for last-known values: one file under
 `<game dir>/tensura_xaero_integration/`, all dimensions in it, keyed by a
 sanitised world token plus a hash of the exact token so two worlds can never
-collide. Saves are atomic (temp file then move), periodic saves run on a daemon
-thread, and session transitions save inline so the reload that follows sees the
-new file. A corrupt or missing file reads as "no history" and the game carries
-on. The writer thread exists only for the 30-second in-game save, so no map
-frame ever waits on disk.
+collide. Saves are atomic (temp file then move) and every write happens on a
+daemon writer thread, so no map frame ever waits on disk. A corrupt or missing
+file reads as "no history" and the game carries on.
+
+The two places that need a write to be *visible* - a session change that reloads
+the world immediately, and logout - wait on that write for at most
+`WRITE_TIMEOUT_MILLIS` (250 ms) and then carry on: a write that misses the
+quarter second keeps going on the writer thread rather than holding the client,
+which is what the old five-second flush did on every disconnect.
 
 On session start (and on a dimension change, where the store is cleared) the
 file is replayed through `restoreHistory`, which can never overwrite a value the
