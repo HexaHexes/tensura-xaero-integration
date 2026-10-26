@@ -107,7 +107,7 @@ Responsibilities:
   such player's queue. No packet is built per chunk; the queue is flushed once
   per tick.
 - **Periodic path.** `onServerTick` pushes the `ServerInfoPayload` (baseline and
-  refresh cadence) when it is due (600 ticks) or pending, prunes subscriptions
+  refresh cadence) when it is due (200 ticks) or pending, prunes subscriptions
   that left the player's dimension or radius, runs `reconcile` every
   `reconcileIntervalTicks`, runs the heartbeat, and flushes.
 - **Heartbeat.** A chunk parked at its ceiling never changes, so change-gated
@@ -118,7 +118,12 @@ Responsibilities:
   entries per cycle from a rotating cursor, so a player with 2 000 subscriptions
   costs a few hundred field reads every few seconds rather than a stall.
 - **Unloaded chunks.** `offerCurrent` reports a chunk that is no longer loaded as
-  unavailable (`NaN`) instead of letting its last value live on.
+  unavailable (`NaN`) instead of letting its last value live on, and says once per
+  session why it could not read one: no loaded chunk there (expected at the
+  corners of a square request radius that reaches past the view distance), or a
+  loaded chunk from which Tensura returned no storage or no usable value (an
+  integration fault). The client sees the same `NaN` either way, so only the
+  server can draw that distinction.
 - **Privacy.** Nothing is ever sent for a chunk the player did not subscribe to,
   and subscriptions are additionally bounded by distance and loaded state, so a
   modified client can only reach chunks it is physically standing among.
@@ -136,7 +141,11 @@ Responsibilities:
   paint bands the pack actually chose. The millisecond promise exists because a
   server that cannot keep up stretches its ticks: a client-side window counted in
   client ticks expires early against such a server, which is what made values
-  flicker between live and last known.
+  flicker between live and last known. The promise is `CadenceEstimate`: the worst
+  of the last 15 timed sweeps, extrapolated to one confirmation, floored at the
+  nominal `intervalTicks * 50 ms` and capped at four intervals so a resumed pause
+  cannot claim minutes. It is re-sent every 200 ticks, so a promise widened by a
+  stall reaches clients within one confirmation instead of up to 30 s late.
 - `PackedChunkPos`: `(x << 32) | (z & 0xFFFFFFFFL)` with sign-safe unpacking.
 
 ## 4. Client components
@@ -281,6 +290,7 @@ world-map-only install loads only what exists.
 | `concentration/OverlayPalette` | `#RRGGBB` parsing, per-band ARGB in Xaero's encoding |
 | `refresh/UpdateQueue` | change detection, per-chunk minimum interval, heartbeat re-queue, bounded drain, retention pruning |
 | `refresh/ReconcileCursor` | rotating bounded slice over a set |
+| `refresh/CadenceEstimate` | measured confirmation promise: worst recent sweep, floored at nominal and capped |
 | `cache/ConcentrationFileFormat` | strict binary codec for the persisted last-known values |
 | `client/ClientConcentrationStore` | mapped-only ingress, live/last-known states, replay, region versions |
 

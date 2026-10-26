@@ -4,6 +4,34 @@ All notable changes to this project. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses
 semantic versioning with pre-release suffixes.
 
+## [0.1.0-alpha.10] — 2026-10-26
+
+The window follows the server through its own stalls, and an unreadable chunk now
+says which kind of unreadable it was.
+
+### Fixed
+
+- **A stalling server still promised a healthy cadence.** The measured promise threw
+  away every sample of 5 s or more, so a session logging `Can't keep up! ... 6330 ms
+  or 126 ticks behind` kept promising 10 s per confirmation while a confirmation took
+  far longer, and the client dimmed values the server was still sending. Stall
+  samples are now what the promise is built from: the worst of the last 15 timed
+  sweeps, extrapolated to one interval, floored at the nominal figure and capped at
+  four intervals so a resumed pause cannot claim minutes. A recovering server
+  narrows its promise again instead of carrying one stall for the session.
+- The promise (and the baseline) is re-sent every 200 ticks instead of 600, so a
+  server that starts stalling widens the client's window within one confirmation.
+
+### Added
+
+- `refresh/CadenceEstimate`, with its own unit tests, so the promise's bounds and
+  its decay are testable without a game.
+- The server now logs once per session why a subscribed chunk could not be read:
+  no loaded chunk there (expected at the corners of a square request radius that
+  reaches past the view distance) or a loaded chunk Tensura returned no storage or
+  no usable value for. The client receives the same `NaN` either way, so this is
+  the only place the two can be told apart.
+
 ## [0.1.0-alpha.9] — 2026-10-26
 
 Values stop dimming while the game is paused, and the log now says which silence

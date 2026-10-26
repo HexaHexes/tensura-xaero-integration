@@ -73,9 +73,9 @@ public final class ServerConfig {
                 .comment("How often a subscribed chunk that has not changed is confirmed again.")
                 .comment("Without this, a chunk sitting at its ceiling would be sent once and")
                 .comment("then look stale to the client, which dims it and labels it last known.")
-                .comment("The client derives its freshness window from this value (twice the")
-                .comment("interval), so raising it automatically makes values count as current")
-                .comment("for longer. 200 ticks is 10 seconds at 20 tps.")
+                .comment("The client derives its freshness window from this value (three measured")
+                .comment("confirmations of it), so raising it automatically makes values count as")
+                .comment("current for longer. 200 ticks is 10 seconds at 20 tps.")
                 .defineInRange("refreshIntervalTicks", 200, 20, 24000);
         MAX_UPDATES_PER_PACKET = builder
                 .comment("Chunk updates batched into one packet.")

@@ -80,6 +80,15 @@ in client ticks then expires before the next confirmation arrives. Three beats o
 slack is what absorbs the remaining stutters. The measured cadence is logged on join,
 next to the baseline.
 
+The measured cadence is the **worst** of the server's recent sweep timings, not the
+average and not a stall-free ideal: a fetch that took 1.5 s for 20 ticks really does
+mean 15 s for 200, and a promise that ignored it would be a lie the client acts on.
+It is floored at the configured interval (a fast server still confirms on schedule)
+and capped at four intervals, so a resumed pause cannot talk the client into
+trusting a value for minutes, and a stall stops counting after fifteen sweeps. The
+promise is re-sent every 200 ticks, so a server that starts stalling widens the
+client's window within one confirmation rather than thirty seconds later.
+
 Paused time does not count. Opening the pause menu in singleplayer freezes the
 integrated server, which then confirms nothing at all, while the client keeps
 running; counting that time would expire every value in the world and dim the whole
