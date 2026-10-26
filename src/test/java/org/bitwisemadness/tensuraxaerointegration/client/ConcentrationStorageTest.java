@@ -27,7 +27,7 @@ class ConcentrationStorageTest {
     @Test
     void a_saved_world_reads_back_unchanged() {
         ConcentrationStorage storage = new ConcentrationStorage(this.gameDirectory);
-        storage.saveNow("sp:My World", contents());
+        assertTrue(storage.saveAndWait("sp:My World", contents(), 5_000L), "the write landed in time");
 
         assertEquals(contents(), storage.load("sp:My World", 100).orElseThrow());
         assertTrue(Files.isDirectory(this.gameDirectory.resolve(ConcentrationStorage.FOLDER)));
@@ -40,6 +40,25 @@ class ConcentrationStorageTest {
         storage.flush();
 
         assertEquals(contents(), storage.load("mp:example.org:25565", 100).orElseThrow());
+    }
+
+    @Test
+    void a_save_that_has_to_be_visible_waits_for_itself_not_for_the_clock() {
+        ConcentrationStorage storage = new ConcentrationStorage(this.gameDirectory);
+        // A save can be read back the moment it reports success: that is the
+        // contract the session-change path relies on when it loads immediately
+        // afterwards, and it no longer costs a fixed five-second wait.
+        assertTrue(storage.saveAndWait("sp:immediate", contents(), ConcentrationStorage.WRITE_TIMEOUT_MILLIS));
+        assertEquals(contents(), storage.load("sp:immediate", 100).orElseThrow());
+    }
+
+    @Test
+    void a_flush_with_no_deadline_left_returns_instead_of_throwing() {
+        ConcentrationStorage storage = new ConcentrationStorage(this.gameDirectory);
+        storage.saveAsync("sp:late", contents());
+        storage.flush(0L); // may or may not catch the write; it must not block or throw
+        storage.flush();    // and this one lets it land
+        assertEquals(contents(), storage.load("sp:late", 100).orElseThrow());
     }
 
     @Test
@@ -73,7 +92,7 @@ class ConcentrationStorageTest {
     @Test
     void a_blank_world_token_is_still_usable() {
         ConcentrationStorage storage = new ConcentrationStorage(this.gameDirectory);
-        storage.saveNow("", contents());
+        assertTrue(storage.saveAndWait("", contents(), 5_000L));
         assertEquals(contents(), storage.load("", 100).orElseThrow());
     }
 }

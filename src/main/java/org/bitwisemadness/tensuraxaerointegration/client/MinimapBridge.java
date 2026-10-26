@@ -1,6 +1,7 @@
 package org.bitwisemadness.tensuraxaerointegration.client;
 
-import java.util.Set;
+import it.unimi.dsi.fastutil.longs.LongSet;
+import it.unimi.dsi.fastutil.longs.LongSets;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
@@ -27,15 +28,15 @@ public final class MinimapBridge {
     }
 
     /** Packed chunk positions the minimap has written in its current window. */
-    public static Set<Long> mappedChunks(ResourceKey<Level> dimension, int centerChunkX, int centerChunkZ, int radius) {
+    public static LongSet mappedChunks(ResourceKey<Level> dimension, int centerChunkX, int centerChunkZ, int radius) {
         if (!available() || dimension == null) {
-            return Set.of();
+            return LongSets.emptySet();
         }
         try {
             return XaeroMinimapAccess.mappedChunks(dimension, centerChunkX, centerChunkZ, radius);
         } catch (Throwable failure) {
             logFailure(failure);
-            return Set.of();
+            return LongSets.emptySet();
         }
     }
 

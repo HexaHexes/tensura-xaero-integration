@@ -24,6 +24,14 @@ public enum ConcentrationClassification {
     /** The highest configured intensity. */
     EXCEPTIONALLY_ELEVATED("exceptionally_elevated");
 
+    /**
+     * The constants, once. {@link #values()} returns a fresh copy of the array on
+     * every call (the compiler emits {@code $VALUES.clone()}), which is fine
+     * outside hot code and wrong inside it: a band is looked up per chunk per
+     * frame by both map highlighters.
+     */
+    private static final ConcentrationClassification[] VALUES = values();
+
     private final String key;
 
     ConcentrationClassification(String key) {
@@ -63,16 +71,24 @@ public enum ConcentrationClassification {
      *         guessed
      */
     public static Optional<ConcentrationClassification> fromCode(int code) {
-        ConcentrationClassification[] values = values();
-        if (code < 0 || code >= values.length) {
-            return Optional.empty();
-        }
-        return Optional.of(values[code]);
+        ConcentrationClassification value = byCode(code);
+        return value == null ? Optional.empty() : Optional.of(value);
+    }
+
+    /**
+     * The band for a code, or {@code null} when the code means "no band".
+     *
+     * <p>The allocation-free form, for render paths that only need to pick a
+     * colour and would otherwise allocate an {@link Optional} per chunk per
+     * frame. Prefer {@link #fromCode} everywhere else.</p>
+     */
+    public static ConcentrationClassification byCode(int code) {
+        return code < 0 || code >= VALUES.length ? null : VALUES[code];
     }
 
     /** Looks a band up by its JSON/datapack key. */
     public static Optional<ConcentrationClassification> fromKey(String key) {
-        for (ConcentrationClassification value : values()) {
+        for (ConcentrationClassification value : VALUES) {
             if (value.key.equals(key)) {
                 return Optional.of(value);
             }

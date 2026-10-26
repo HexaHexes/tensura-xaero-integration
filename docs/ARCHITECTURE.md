@@ -190,9 +190,22 @@ Pure, Minecraft-free store (`ChunkCacheKey` → entry) with two display states.
 A value is either **live** (the server confirmed it within the freshness window,
 three times the server's measured confirmation time, on a wall clock) or
 **last known** (a real earlier observation that is no longer being refreshed).
-`observe(...)` returns one `Observation` carrying the value, its band and which
-of the two it is; the renderers and the hover line never look at the raw entry.
-The four rules that make this safe:
+Three reads serve it, and all of them report the same state:
+
+- `observe(...)` returns one `Observation` with the value, its band and which of
+  the two states it is in. The semantic form, and the oracle the JUnit suite uses.
+- `paintState(...)` packs the band and the liveness into one `int` (`NO_PAINT` when
+  there is nothing), which is all a highlighter needs: the number never affects a
+  colour. This is what the map paint path reads, per visible chunk per tile rebuild.
+- `rawEntryOrNull(...)` hands back the immutable entry for the hover line, which does
+  need the number as well, on every map frame.
+
+Both hot reads are addressed by `(world token, dimension, chunk x, chunk z)` rather
+than by a key. `ConcentrationCache` keeps a long-keyed index of packed chunk positions
+per world-and-dimension scope alongside its write-ordered map - the map stays
+authoritative for recency, eviction and the on-disk snapshot, and every write, removal,
+eviction and clear updates both - so neither a paint nor a hover lookup allocates a
+`ChunkCacheKey`. The four rules that make this safe:
 
 - `offer(key, mapped, value, band)` **refuses the write when `mapped` is false**,
   so an unmapped chunk can never enter the cache even if a packet named it. The
@@ -215,11 +228,15 @@ stays unavailable.
 Per-world file store for last-known values: one file under
 `<game dir>/tensura_xaero_integration/`, all dimensions in it, keyed by a
 sanitised world token plus a hash of the exact token so two worlds can never
-collide. Saves are atomic (temp file then move), periodic saves run on a daemon
-thread, and session transitions save inline so the reload that follows sees the
-new file. A corrupt or missing file reads as "no history" and the game carries
-on. The writer thread exists only for the 30-second in-game save, so no map
-frame ever waits on disk.
+collide. Saves are atomic (temp file then move) and every write happens on a
+daemon writer thread, so no map frame ever waits on disk. A corrupt or missing
+file reads as "no history" and the game carries on.
+
+The two places that need a write to be *visible* - a session change that reloads
+the world immediately, and logout - wait on that write for at most
+`WRITE_TIMEOUT_MILLIS` (250 ms) and then carry on: a write that misses the
+quarter second keeps going on the writer thread rather than holding the client,
+which is what the old five-second flush did on every disconnect.
 
 On session start (and on a dimension change, where the store is cleared) the
 file is replayed through `restoreHistory`, which can never overwrite a value the
@@ -237,6 +254,11 @@ on the network thread.
 `mappedChunks(dimension, cx, cz, radius)`, `refreshRegion(RegionKey)`. They call
 into `XaeroWorldMapAccess` / `XaeroMinimapAccess` only after the gate.
 
+`mappedChunks` returns a `LongSet` of packed positions, not a `Set<Long>`: the walk
+runs on every subscribe tick over everything the maps hold in range, and a boxed
+`Long` per hit was most of what it allocated. The empty answer is the shared
+`LongSets.emptySet()`, which callers only ever merge from.
+
 ### `client/XaeroWorldMapAccess` / `client/XaeroMinimapAccess`
 The Xaero-aware classes:
 
@@ -245,6 +267,10 @@ The Xaero-aware classes:
   for the minimap — i.e. "a tile actually exists for this chunk", which is what
   Xaero itself means by mapped. Chunk-loaded, chunk-generated and
   server-visited are *not* substitutes.
+- the single-chunk test (`isMapped`) asks for that chunk directly, stopping at the
+  first loaded layer that has a tile. The world map's layer walk only offers a
+  callback, so one reusable probe holds the answer; `isChunkMapped` no longer
+  builds a one-element result set per call.
 - repaint: `DimensionHighlighterHandler.clearCachedHash(regionX, regionZ)` on the
   world map and `requestRefresh(regionX, regionZ)` on the minimap writer, both
   guarded to the dimension currently being viewed.
@@ -258,14 +284,32 @@ and colour, so the two maps can never disagree:
 - `chunkIsHighlit` — true only for a chunk present in the store, mapped, fresh,
   and above the baseline band; this gate also controls whether the tooltip path
   is consulted at all.
-- `getChunkHighlitColor` — 256 ARGB entries in Xaero's channel order
+- `getColors` — the five colours one chunk needs, in Xaero's channel order
   (`blue << 24 | green << 16 | red << 8 | alpha`), with a zero-alpha colour for
-  chunks that are highlit only so their tooltip can show.
+  chunks that are highlit only so their tooltip can show. Xaero's
+  `getChunkHighlitColor` reads the five entries into locals and copies them into
+  its own 256-entry result store before returning, so each overlay fills a
+  per-thread `int[5]` rather than allocating one per chunk (per thread because the
+  map's render and writer threads both ask, and one array between them would race).
+- the colour comes from `ClientConcentrationStore.paintState` — one locked lookup
+  that packs the band and the liveness into an `int`, with `NO_PAINT` when the
+  chunk holds nothing. A tile rebuild therefore never builds an `Observation`;
+  `observe` stays for the hover line, which does need the number.
 - `calculateRegionHash` / `regionHasHighlights` — derived from the store's
   per-region version, so a region repaints exactly when one of its values changed.
+  Xaero asks both for the same region while rebuilding it, so the world map remembers
+  the last `RegionKey` (`cache/RegionKeyMemo`) instead of building one per call; the
+  minimap asks once per region, where a memo could never hit.
 - `getBlockHighlightSubtleTooltip` / `getBlockHighlightBluntTooltip` (world map
   only) — the hovered block's chunk, never the player's chunk, rendered through
-  `client/HoverText` and `util/ConcentrationText`.
+  `client/HoverText` and `util/ConcentrationText`. Xaero asks for the blunt tooltip
+  every frame and only reads what it gets back, so `HoverText` remembers the line it
+  last built and returns it while the value, its liveness and its band are unchanged:
+  a still hover does no number formatting and builds no component graph. The
+  remembered line is a translatable component, so a language reload still takes
+  effect. The read behind it is `rawEntryOrNull`, the immutable cache entry, rather
+  than `observe` - a hovered chunk is asked about on every frame, and the three fields
+  the line needs are already on the entry, so the frame allocates nothing.
 
 Constructors pass `coveringOutsideDiscovered = false`, so Xaero's own discovered
 gate is an additional outer barrier for anything this code might miss.
@@ -285,7 +329,7 @@ world-map-only install loads only what exists.
 | --- | --- |
 | `cache/ChunkCacheKey` | world token + dimension + chunk x/z; the only identity used for data |
 | `cache/ConcentrationEntry` | value, mapped flag, timestamps, staleness |
-| `cache/ConcentrationCache` | bounded map with LRU-ish eviction and invalidation |
+| `cache/ConcentrationCache` | bounded map, recency by write (reads are read-only), live-key expiry sweep |
 | `cache/RegionKey` | 32×32-chunk region identity used for repaint invalidation |
 | `concentration/ConcentrationThresholds` | baseline-relative band boundaries, validated to increase (the server's ladder, from the datapack) |
 | `tiers/DimensionTier` | one dimension's normal concentration and band ladder |
@@ -300,6 +344,25 @@ world-map-only install loads only what exists.
 | `util/ChunkRadius` | the circular request radius, shared by the client's request and the server's cap |
 | `cache/ConcentrationFileFormat` | strict binary codec for the persisted last-known values |
 | `client/ClientConcentrationStore` | mapped-only ingress, live/last-known states, replay, region versions |
+
+The store's read path is shaped by who calls it. Two Xaero highlighters ask
+`chunkIsHighlit` and `getColors` for every visible chunk each time they (re)build
+a map tile's texture - `LeafRegionTexture.applyHighlights` and
+`MapRegionHighlightsPreparer` on the world map, `MinimapWriter.writeTile` on the
+minimap - from the map's render/writer threads. The one query Xaero makes on every
+frame is the hover line: `GuiMap`'s draw asks `getBlockHighlightBluntTooltip` for
+the chunk under the cursor each time it renders, which is why that line is
+memoised (see the highlighter section below).
+
+So `hasValue` answers "paint or not" without building an observation,
+`ClientConcentration.dimensionIdOf` memoises the one dimension string a tile needs,
+`ConcentrationClassification.byCode` returns the constant instead of an `Optional`,
+and `ClientConfig.palette` memoises the resolved palette until the config reloads
+or the server sends a different one (each of those was previously rebuilt per
+chunk, with eight config lookups). Expiry is a sweep over the cache's *live* keys
+rather than a snapshot of the whole map: most of a long session's cache is
+remembered history that can never expire, and copying it every second held the
+lock the renderer needs.
 
 These carry the logic that the specification cares about, which is why the JUnit
 suite can cover it without a game client.

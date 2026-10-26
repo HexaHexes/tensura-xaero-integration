@@ -4,6 +4,7 @@ import net.minecraft.client.Minecraft;
 import net.neoforged.neoforge.client.event.ClientPlayerNetworkEvent;
 import net.neoforged.neoforge.client.event.ClientTickEvent;
 import net.neoforged.neoforge.common.NeoForge;
+import org.bitwisemadness.tensuraxaerointegration.config.ClientConfig;
 
 /**
  * Wires the client-only listeners.
@@ -34,6 +35,9 @@ public final class ClientSetup {
 
     /** Repaints everything after a client config edit that changes the overlay. */
     public static void onClientConfigReloaded() {
+        // The resolved palette is memoised per paint; a colour edit must not keep
+        // painting the previous one.
+        ClientConfig.invalidatePalette();
         ClientConcentration.get().store().markAllRegionsDirty();
     }
 }

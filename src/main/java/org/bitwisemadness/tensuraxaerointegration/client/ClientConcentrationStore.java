@@ -296,16 +296,84 @@ public final class ClientConcentrationStore {
      * recently, otherwise the last known value. Empty when nothing is held.
      */
     public Optional<Observation> observe(ChunkCacheKey key, long windowMillis) {
-        Optional<ConcentrationEntry> entry = this.cache.entry(key);
-        if (entry.isEmpty() || !entry.get().available()) {
+        ConcentrationEntry entry = rawEntryOrNull(key);
+        if (entry == null || !entry.available()) {
             return Optional.empty();
         }
-        ConcentrationEntry value = entry.get();
-        boolean live = value.fresh(now(), windowMillis);
+        boolean live = entry.fresh(now(), windowMillis);
         // The band is the server's, never recomputed here: it owns the tier table.
         Optional<ConcentrationClassification> classification =
-                ConcentrationClassification.fromCode(value.band());
-        return Optional.of(new Observation(value.value(), classification, live));
+                ConcentrationClassification.fromCode(entry.band());
+        return Optional.of(new Observation(entry.value(), classification, live));
+    }
+
+    /**
+     * The stored entry for a chunk, or {@code null} when there is none.
+     *
+     * <p>The allocation-free read behind {@link #observe}: the hover line asks for
+     * a chunk on every map frame and needs the number, the band and the liveness,
+     * none of which requires an {@code Optional} or an {@link Observation}. The
+     * entry is immutable; never write through it.</p>
+     */
+    public ConcentrationEntry rawEntryOrNull(ChunkCacheKey key) {
+        return this.cache.entryOrNull(key);
+    }
+
+    /**
+     * A paint state that means "nothing to draw for this chunk".
+     *
+     * @see #paintState(ChunkCacheKey, long)
+     */
+    public static final int NO_PAINT = -1;
+
+    /**
+     * The band and liveness a map needs to colour a chunk, without building an
+     * {@link Observation}.
+     *
+     * <p>This is the read the two Xaero highlighters make for every visible chunk
+     * each time they rebuild a map tile, and it does not need the number: the
+     * colour comes from the band and the opacity from the liveness. Going through
+     * {@link #observe} cost an {@code Optional} for the entry, a record and an
+     * {@code Optional} for the band per chunk. The two small pieces are packed
+     * into one {@code int} so the whole read is one map lookup and one lock, and
+     * the answer is decoded with {@link #bandOf} / {@link #liveOf}.</p>
+     *
+     * @return {@link #NO_PAINT}, or {@code (bandCode + 1) << 1 | (live ? 1 : 0)};
+     *         the offset keeps a chunk with no band ({@code -1}) distinct from
+     *         {@link #NO_PAINT}
+     */
+    public int paintState(ChunkCacheKey key, long windowMillis) {
+        return paintState(key.world(), key.dimension(), key.chunkX(), key.chunkZ(), windowMillis);
+    }
+
+    /**
+     * The paint state for a chunk addressed by primitives.
+     *
+     * <p>The form the map highlighters use: they are handed a dimension and chunk
+     * coordinates by Xaero, and building a key for each visible chunk on each tile
+     * rebuild was the last allocation on that path.</p>
+     *
+     * @return {@link #NO_PAINT}, or the packed band and liveness; see
+     *         {@link #paintState(ChunkCacheKey, long)}
+     */
+    public int paintState(String world, String dimension, int chunkX, int chunkZ, long windowMillis) {
+        ConcentrationEntry entry = this.cache.entryAt(world, dimension, chunkX, chunkZ);
+        if (entry == null || !entry.available()) {
+            return NO_PAINT;
+        }
+        // A band code this client does not know is drawn uncoloured, as in observe().
+        int bandCode = ConcentrationClassification.byCode(entry.band()) == null ? -1 : entry.band();
+        return (bandCode + 1) << 1 | (entry.fresh(now(), windowMillis) ? 1 : 0);
+    }
+
+    /** The band in a paint state, or {@code null} when the chunk has none. */
+    public static ConcentrationClassification bandOf(int paintState) {
+        return ConcentrationClassification.byCode((paintState >> 1) - 1);
+    }
+
+    /** Whether a paint state is live rather than last known. */
+    public static boolean liveOf(int paintState) {
+        return (paintState & 1) != 0;
     }
 
     /** Every available value held, live or last-known; the persistence snapshot. */
@@ -386,33 +454,41 @@ public final class ClientConcentrationStore {
      *         nothing expired
      */
     public Optional<Expiry> expire(long windowMillis) {
-        long now = now();
-        List<ChunkCacheKey> stale = new ArrayList<>();
-        ChunkCacheKey oldest = null;
-        long oldestAge = -1L;
-        for (ConcentrationCache.Snapshot snapshot : this.cache.snapshot()) {
-            ConcentrationEntry entry = snapshot.entry();
-            if (!entry.available() || entry.historical() || entry.fresh(now, windowMillis)) {
-                continue;
-            }
-            long age = now - entry.stampMillis();
-            stale.add(snapshot.key());
-            if (age > oldestAge) {
-                oldestAge = age;
-                oldest = snapshot.key();
-            }
-        }
-        if (stale.isEmpty()) {
+        List<ConcentrationCache.Expired> expired = this.cache.expire(now(), windowMillis);
+        if (expired.isEmpty()) {
             return Optional.empty();
         }
-        int demoted = 0;
-        for (ChunkCacheKey key : stale) {
-            if (this.cache.demote(key)) {
-                bumpRegion(key);
-                demoted++;
+        ChunkCacheKey oldest = null;
+        long oldestAge = -1L;
+        for (ConcentrationCache.Expired value : expired) {
+            bumpRegion(value.key());
+            if (value.ageMillis() > oldestAge) {
+                oldestAge = value.ageMillis();
+                oldest = value.key();
             }
         }
-        return demoted == 0 ? Optional.empty() : Optional.of(new Expiry(demoted, oldest, oldestAge));
+        return Optional.of(new Expiry(expired.size(), oldest, oldestAge));
+    }
+
+    /**
+     * Whether anything displayable is held for a chunk, current or remembered.
+     *
+     * <p>What a map's "is this chunk highlit" hook needs, and it allocates
+     * nothing - unlike {@link #observe}, which both highlighters call once per
+     * chunk each time they rebuild a tile.</p>
+     */
+    public boolean hasValue(ChunkCacheKey key) {
+        return this.cache.hasAvailable(key);
+    }
+
+    /**
+     * Whether a chunk addressed by primitives holds anything displayable.
+     *
+     * <p>The form {@code chunkIsHighlit} uses, so a map tile rebuild never builds a
+     * key.</p>
+     */
+    public boolean hasValue(String world, String dimension, int chunkX, int chunkZ) {
+        return this.cache.hasAvailableAt(world, dimension, chunkX, chunkZ);
     }
 
     /**

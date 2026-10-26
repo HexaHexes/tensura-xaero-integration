@@ -170,6 +170,10 @@ dependencies {
     // The tier parser is pure Gson; Minecraft supplies it at runtime, but the
     // plain JUnit classpath does not. Same version Minecraft ships.
     testImplementation 'com.google.code.gson:gson:2.10.1'
+    // The cache's allocation-free reads are keyed by packed positions; Minecraft
+    // supplies fastutil at runtime, but the plain JUnit classpath does not. Same
+    // version Minecraft ships.
+    testImplementation 'it.unimi.dsi:fastutil:8.5.12'
 }
 
 // Stage Tensura and its closure into the run's production-style mods/ folder,
@@ -198,6 +202,9 @@ test {
 // with -PgametestTimeoutSeconds=...
 def gametestTimeoutSeconds = (project.findProperty('gametestTimeoutSeconds') ?: '240') as int
 
+// The stall-dump watcher, so a later run can stop the previous run's copy.
+def gametestWatchdog = null
+
 // Runs even when the run task was killed by its timeout, which is exactly the case
 // where the grader above never gets a chance to explain itself.
 def reportGametestStall = tasks.register('reportGametestStall') {
@@ -208,11 +215,67 @@ def reportGametestStall = tasks.register('reportGametestStall') {
         }
         def text = log.text
         if (text.contains('tests are now running') && !(text =~ /GAME TESTS COMPLETE/).find()) {
+            def dump = file('run/logs/gametest-thread-dump.txt')
+            def where = dump.exists() ? " Thread dump: ${dump}" : ''
             logger.error("GameTest was stopped after ${gametestTimeoutSeconds}s with its tests "
                     + "registered but none completed - the harness wedged, not the tests. "
-                    + "See ${log}")
+                    + "See ${log}.${where}")
         }
     }
+}
+
+// A wedged run is silent: the log only shows progress lines, then the timeout kills
+// the server and whatever it was parked on is lost. Dump every thread shortly before
+// that kill, so the next stall says where the server thread was waiting instead of
+// only that it was quiet.
+def dumpWedgedGametestThreads = {
+    def log = file('run/logs/latest.log')
+    if (!log.exists()) {
+        return
+    }
+    def text = log.text
+    if (!text.contains('tests are now running') || (text =~ /GAME TESTS COMPLETE/).find()) {
+        return // not wedged (or never started): nothing worth dumping
+    }
+    def javaHome = System.getProperty('java.home')
+    // Windows ships the launchers with an extension, which File does not resolve.
+    def jstack = [new File(javaHome, 'bin/jstack.exe'), new File(javaHome, 'bin/jstack')]
+            .find { it.canExecute() }
+    if (jstack == null) {
+        logger.warn("GameTest looks wedged but jstack is missing from ${javaHome}; no thread dump taken")
+        return
+    }
+    // The forked server is identified by the program-arguments file Gradle hands it -
+    // the launch target itself sits inside that file, not on the command line. The
+    // dev-launch main class is the fallback when the file name ever changes.
+    def candidates = []
+    def fallbacks = []
+    java.lang.ProcessHandle.allProcesses().forEach { handle ->
+        def info = handle.info()
+        def commandLine = info.commandLine().orElse('')
+        def arguments = info.arguments()
+        if (commandLine.contains('gameTestServerRunProgramArgs.txt')) {
+            candidates << handle
+        } else if (arguments.isPresent()
+                && (arguments.get() as List).contains('net.neoforged.devlaunch.Main')) {
+            fallbacks << handle
+        }
+    }
+    def found = candidates ?: fallbacks
+    if (!found) {
+        logger.warn('GameTest looks wedged but its server process was not found; no thread dump taken')
+        return
+    }
+    def server = found.max { handle ->
+        handle.info().startInstant().orElse(java.time.Instant.EPOCH)
+    }
+    def target = file('run/logs/gametest-thread-dump.txt')
+    def dump = new ProcessBuilder(jstack.absolutePath, '-l', server.pid().toString())
+            .redirectErrorStream(true)
+            .start()
+    target.text = dump.inputStream.getText('UTF-8')
+    dump.waitFor()
+    logger.lifecycle("GameTest looks wedged; thread dump of pid ${server.pid()} written to ${target}")
 }
 
 // Grade the run on the log summary, not the exit code: the GameTestServer prints
@@ -227,6 +290,24 @@ tasks.matching { it.name == 'runGameTestServer' }.configureEach {
         // A stale log must never be able to answer for this run: the grader below
         // reads it, and a killed run would otherwise be judged on its predecessor.
         file('run/logs/latest.log').delete()
+        file('run/logs/gametest-thread-dump.txt').delete()
+        // Watchdog for the stall below: dump threads ten seconds before the kill. Only
+        // one per build daemon, so a run does not inherit its predecessor's watcher.
+        gametestWatchdog?.interrupt()
+        def delaySeconds = Math.max(30, gametestTimeoutSeconds - 10)
+        def watchdog = new Thread({
+            try {
+                Thread.sleep(delaySeconds * 1000L)
+                dumpWedgedGametestThreads()
+            } catch (InterruptedException ignored) {
+                Thread.currentThread().interrupt()
+            } catch (Throwable failure) {
+                logger.warn("Could not take a GameTest thread dump: ${failure}")
+            }
+        }, 'gametest-thread-dump')
+        watchdog.daemon = true
+        watchdog.start()
+        gametestWatchdog = watchdog
     }
     doLast {
         def log = file('run/logs/latest.log')

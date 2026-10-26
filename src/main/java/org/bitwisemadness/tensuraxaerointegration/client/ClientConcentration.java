@@ -1,8 +1,9 @@
 package org.bitwisemadness.tensuraxaerointegration.client;
 
+import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
+import it.unimi.dsi.fastutil.longs.LongSet;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -128,10 +129,65 @@ public final class ClientConcentration {
         return this.dimensionId;
     }
 
+    /**
+     * The last dimension asked about, with its id. Published as one immutable value
+     * so a render thread can never pair one dimension's key with another's id.
+     */
+    private record DimensionMemo(ResourceKey<Level> dimension, String id) {
+    }
+
+    /** One entry is enough: a map asks for thousands of chunks of one dimension. */
+    private volatile DimensionMemo dimensionMemo;
+
+    /**
+     * The world token this session keys chunks by.
+     *
+     * <p>Never blank, so it can be handed straight to the cache's primitive reads;
+     * the field itself is returned, so this allocates nothing.</p>
+     */
+    private String keyWorldToken() {
+        return this.worldToken.isBlank() ? "unknown" : this.worldToken;
+    }
+
     /** Builds the cache key for a chunk in a dimension, scoped to this session's world. */
     public ChunkCacheKey key(ResourceKey<Level> dimension, int chunkX, int chunkZ) {
-        String token = this.worldToken.isBlank() ? "unknown" : this.worldToken;
-        return new ChunkCacheKey(token, dimension.location().toString(), chunkX, chunkZ);
+        return new ChunkCacheKey(keyWorldToken(), dimensionIdOf(dimension), chunkX, chunkZ);
+    }
+
+    /**
+     * The paint state for a chunk, addressed the way a map hands it over.
+     *
+     * <p>A highlighter gets a dimension and chunk coordinates for every visible
+     * chunk on every tile rebuild; going through {@link #key} made a record for
+     * each one, so this reads the store by primitive position instead.</p>
+     */
+    public int paintState(ResourceKey<Level> dimension, int chunkX, int chunkZ) {
+        ClientConcentrationStore store = store();
+        return store.paintState(keyWorldToken(), dimensionIdOf(dimension), chunkX, chunkZ,
+                store.staleAfterMillis());
+    }
+
+    /** Whether a chunk holds anything displayable, without building a key. */
+    public boolean hasValue(ResourceKey<Level> dimension, int chunkX, int chunkZ) {
+        return store().hasValue(keyWorldToken(), dimensionIdOf(dimension), chunkX, chunkZ);
+    }
+
+    /**
+     * The dimension id this mod keys chunks by, memoised.
+     *
+     * <p>{@code location().toString()} builds a new String on every call, and the
+     * map highlighters ask for a chunk key once per visible chunk every time they
+     * rebuild a tile. A map draws one dimension at a time, so a single remembered
+     * entry covers it.</p>
+     */
+    public String dimensionIdOf(ResourceKey<Level> dimension) {
+        DimensionMemo memo = this.dimensionMemo;
+        if (memo != null && (memo.dimension() == dimension || memo.dimension().equals(dimension))) {
+            return memo.id();
+        }
+        String id = dimension.location().toString();
+        this.dimensionMemo = new DimensionMemo(dimension, id);
+        return id;
     }
 
     /** Drives staleness, subscription diffing and map invalidation. */
@@ -214,8 +270,10 @@ public final class ClientConcentration {
 
     /** Full reset: used on disconnect and world change. */
     public void resetSession() {
-        // Capture what was learned before the store is dropped.
-        saveToDisk(this.worldToken, true);
+        // Capture what was learned before the store is dropped. Queued, not
+        // written here: nothing loads this token afterwards, and a disconnect must
+        // not wait on the disk.
+        saveToDisk(this.worldToken, false);
         this.subscriptions.clear();
         store().clear();
         store().clearServerInfo();
@@ -242,10 +300,10 @@ public final class ClientConcentration {
      * coloured the way it was when the values were observed rather than against
      * whatever tiers the datapack holds today.</p>
      *
-     * @param synchronous true when a load follows immediately, so the write must
-     *                    be on disk before it runs
+     * @param visibleToTheNextLoad true when a load of the same world follows
+     *                             immediately and the file must be current for it
      */
-    private void saveToDisk(String token, boolean synchronous) {
+    private void saveToDisk(String token, boolean visibleToTheNextLoad) {
         if (!ClientConfig.persistenceEnabled() || token == null || token.isBlank()) {
             return;
         }
@@ -260,8 +318,14 @@ public final class ClientConcentration {
                     key.dimension(), key.chunkX(), key.chunkZ(), value.value(), value.band()));
         }
         ConcentrationFileFormat.Contents contents = new ConcentrationFileFormat.Contents(rows);
-        if (synchronous) {
-            this.storage.saveNow(token, contents);
+        if (visibleToTheNextLoad) {
+            // Bounded wait: the load that follows needs this file current, but a
+            // slow disk must not freeze the client while it catches up.
+            if (!this.storage.saveAndWait(token, contents, ConcentrationStorage.WRITE_TIMEOUT_MILLIS)) {
+                TensuraXaeroIntegration.LOGGER.debug(
+                        "Concentration history for {} was still being written when the next session loaded it",
+                        token);
+            }
         } else {
             this.storage.saveAsync(token, contents);
         }
@@ -289,7 +353,11 @@ public final class ClientConcentration {
         });
     }
 
-    /** Waits for a queued save; called after the logout save so nothing is lost. */
+    /**
+     * Waits briefly for queued saves; called after the logout save so the last
+     * snapshot usually lands. A write that misses the deadline finishes on the
+     * writer thread instead of holding the client.
+     */
     public void flushPersistence() {
         this.storage.flush();
     }
@@ -343,7 +411,7 @@ public final class ClientConcentration {
         int radius = ClientConfig.subscribeRadiusChunks();
         int centerX = minecraft.player.chunkPosition().x;
         int centerZ = minecraft.player.chunkPosition().z;
-        Set<Long> mapped = mappedChunksNearby(minecraft);
+        LongSet mapped = mappedChunksNearby(minecraft);
         String token = this.worldToken.isBlank() ? "unknown" : this.worldToken;
         Set<ChunkCacheKey> wanted = new LinkedHashSet<>();
         for (long packed : mapped) {
@@ -478,11 +546,11 @@ public final class ClientConcentration {
                 "{} chunk(s) left the request range; their values are now last known", count);
     }
 
-    private Set<Long> mappedChunksNearby(Minecraft minecraft) {
+    private LongSet mappedChunksNearby(Minecraft minecraft) {
         int centerX = minecraft.player.chunkPosition().x;
         int centerZ = minecraft.player.chunkPosition().z;
         int radius = ClientConfig.subscribeRadiusChunks();
-        Set<Long> mapped = new HashSet<>();
+        LongSet mapped = new LongOpenHashSet();
         if (XaeroMods.worldMapPresent()) {
             mapped.addAll(WorldMapBridge.mappedChunks(minecraft.level.dimension(), centerX, centerZ, radius));
         }

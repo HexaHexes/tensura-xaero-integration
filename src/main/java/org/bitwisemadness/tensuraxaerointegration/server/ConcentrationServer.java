@@ -114,6 +114,11 @@ public final class ConcentrationServer {
         this.baseline = Double.NaN;
         this.unloadedChunkReported = false;
         this.unreadableLoadedReported = false;
+        // A second world in the same process (singleplayer world switch) must not
+        // measure its first sweep against a timestamp from the previous one: the
+        // gap would span the world load and widen the promise for fifteen sweeps.
+        this.lastCadenceSampleNanos = 0L;
+        this.cadence = null;
     }
 
     /** Called on server stop: drops every subscription and pending update. */

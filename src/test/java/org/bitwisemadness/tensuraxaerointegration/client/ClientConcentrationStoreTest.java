@@ -2,6 +2,8 @@ package org.bitwisemadness.tensuraxaerointegration.client;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
@@ -440,5 +442,73 @@ class ClientConcentrationStoreTest {
         store.drainDirtyRegions();
         store.markAllRegionsDirty();
         assertEquals(Set.of(REGION), store.drainDirtyRegions());
+    }
+
+    /**
+     * The paint read is what the highlighters use per visible chunk, so it has to
+     * agree with {@link ClientConcentrationStore#observe} about everything it
+     * reports - band and liveness - while carrying no number.
+     */
+    @Test
+    void paint_state_agrees_with_the_observation_it_replaces() {
+        ClientConcentrationStore store = newStore();
+        store.offer(CHUNK, true, 600.0, SLIGHTLY);
+
+        int state = store.paintState(CHUNK, 100);
+        Observation observation = observe(store, CHUNK, 100).orElseThrow();
+
+        assertEquals(ConcentrationClassification.SLIGHTLY_ELEVATED,
+                ClientConcentrationStore.bandOf(state));
+        assertEquals(observation.classification().orElse(null), ClientConcentrationStore.bandOf(state));
+        assertEquals(observation.live(), ClientConcentrationStore.liveOf(state));
+    }
+
+    @Test
+    void a_chunk_with_nothing_stored_has_no_paint_state() {
+        ClientConcentrationStore store = newStore();
+        assertEquals(ClientConcentrationStore.NO_PAINT, store.paintState(CHUNK, 100));
+    }
+
+    @Test
+    void an_unavailable_chunk_has_no_paint_state() {
+        ClientConcentrationStore store = newStore();
+        store.markUnavailable(CHUNK, true);
+        assertEquals(ClientConcentrationStore.NO_PAINT, store.paintState(CHUNK, 100),
+                "the pack said \"no value\" here, so there is nothing to paint");
+    }
+
+    @Test
+    void a_stale_value_paints_as_last_known_with_its_band_intact() {
+        ClientConcentrationStore store = newStore();
+        store.offer(CHUNK, true, 600.0, HIGHLY);
+        advance(500);
+
+        int state = store.paintState(CHUNK, 100);
+        assertFalse(ClientConcentrationStore.liveOf(state),
+                "a value past the window must not paint as current");
+        assertEquals(ConcentrationClassification.HIGHLY_ELEVATED,
+                ClientConcentrationStore.bandOf(state), "the dimmed colour still needs its band");
+    }
+
+    @Test
+    void an_unclassified_value_still_has_a_paint_state() {
+        ClientConcentrationStore store = newStore();
+        store.offer(CHUNK, true, 600.0, UNCLASSIFIED);
+
+        int state = store.paintState(CHUNK, 100);
+        assertNotEquals(ClientConcentrationStore.NO_PAINT, state, "there is still a line to hover");
+        assertTrue(ClientConcentrationStore.liveOf(state));
+        assertNull(ClientConcentrationStore.bandOf(state));
+    }
+
+    @Test
+    void a_band_this_client_does_not_know_paints_uncoloured() {
+        ClientConcentrationStore store = newStore();
+        store.offer(CHUNK, true, 600.0, 99);
+
+        int state = store.paintState(CHUNK, 100);
+        assertNotEquals(ClientConcentrationStore.NO_PAINT, state);
+        assertNull(ClientConcentrationStore.bandOf(state),
+                "an unknown band is shown uncoloured, never guessed");
     }
 }

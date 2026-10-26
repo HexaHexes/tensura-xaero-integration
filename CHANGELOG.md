@@ -4,6 +4,108 @@ All notable changes to this project. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses
 semantic versioning with pre-release suffixes.
 
+## [0.1.0-alpha.12] — 2026-10-26
+
+No behaviour change: the map paint path and the expiry sweep stop allocating and
+stop fighting over one lock.
+
+Xaero asks a highlighter about every visible chunk when it (re)builds a map tile,
+not on every frame; only the hover line is a per-frame query, and that is memoised
+separately below.
+
+### Changed
+
+- **The palette is resolved once, not once per chunk.** Both highlighters asked
+  `ClientConfig.palette` for every visible chunk on every tile rebuild, which built
+  a palette, four tier styles and performed eight config lookups each time. It is
+  now memoised until a config reload (`ClientConfig.invalidatePalette`) or a
+  different server palette arrives.
+- **Chunk keys are built without a dimension string per call.** `location().toString()`
+  allocated a String for every chunk drawn; the last dimension id is memoised in
+  `ClientConcentration.dimensionIdOf`, which the region keys use too.
+- **`chunkIsHighlit` no longer builds an observation.** Xaero asks it and
+  `getColors` for the same chunk, so half of those calls now cost one map lookup
+  and nothing else (`ClientConcentrationStore.hasValue`).
+- **Band lookup no longer copies the enum array.** `values()` allocates a fresh
+  array on every call; `ConcentrationClassification.byCode` reads a cached one.
+- **Reads no longer mutate the cache.** The store was access-ordered, so every
+  repaint rewrote eviction order under the lock the tick thread writes with. Recency
+  now follows writes: the chunk still being confirmed keeps its slot, and what is on
+  screen no longer decides what survives.
+- **A tile rebuild no longer builds an observation to pick a colour.** `getColors`
+  ran for every visible chunk on each map tile rebuild and went through
+  `ClientConcentrationStore.observe`, paying an `Optional` for the entry, an
+  `Observation` record and another `Optional` for the band - to colour a chunk, which
+  needs only the band and whether the value is still current. `paintState` packs those
+  two into one `int` from a single locked lookup (`NO_PAINT` when the chunk holds
+  nothing), decoded with `bandOf`/`liveOf`; `observe` remains for the hover line, which
+  does need the number.
+- **The overlay colour lookup and its array allocate nothing.**
+  `OverlayPalette.xaeroColorFor` built an `Optional` for the tier and a mapped
+  `Optional` for the boxed colour; it now switches straight to the style. `getColors`
+  also fills a per-thread `int[5]` instead of allocating one per chunk - safe because
+  Xaero's `getChunkHighlitColor` copies those five entries into its own result store
+  before returning, and per thread because the map's render and writer threads both
+  ask.
+- **The region hash queries reuse one `RegionKey`.** Xaero asks a highlighter for a
+  region's gate and then its hash while rebuilding that one region, and both built a
+  `RegionKey` per call. The world-map overlay remembers the last key
+  (`cache/RegionKeyMemo`), so the second call is free; the minimap asks once per region,
+  where a memo could never hit.
+- **A wedged GameTest run now explains itself.** The harness dumps every thread of the
+  forked server to `run/logs/gametest-thread-dump.txt` ten seconds before its timeout
+  kills it, and the stall message names the file. The server is located by the
+  program-arguments file Gradle hands it, since its launch target is inside that file
+  rather than on the command line.
+- **The paint path no longer builds a cache key per chunk.** `ConcentrationCache` is
+  authoritative on `ChunkCacheKey` because eviction order, the live set and the on-disk
+  snapshot all need it, but a tile rebuild asks about hundreds of chunks and a record
+  per lookup was all that was left. Every write now also lands in a long-keyed index of
+  packed chunk positions, scoped per world and dimension, and the highlighters read
+  through it (`entryAt`/`hasAvailableAt`, and `paintState`/`hasValue` on the store, which
+  take the world, dimension and coordinates instead of a key). Write, removal, eviction
+  and clear keep both structures in step.
+- **The hover path allocates nothing per frame either.** `HoverText.describe` runs on
+  every map frame and still went through `observe`, paying an `Optional` for the entry,
+  an `Observation` and another `Optional` for the band on each frame. It now reads the
+  immutable entry (`rawEntryOrNull`) and takes the number, band and liveness straight
+  off it, so a hover frame allocates nothing at all once its line is remembered.
+- **The hover line is built once, not once per frame.** `HoverText.describe` runs on
+  every map frame for the block under the cursor, and each call ran a `String.format`
+  for the number plus two `Component.translatable` nodes - the same three results
+  while the pointer and the value held still. The line is now remembered and reused
+  until the value, its liveness or its band changes (the chunk key is reused too),
+  so a still hover only reads the store.
+- **The mapped-chunk walks stop boxing every hit.** `XaeroWorldMapAccess` and
+  `XaeroMinimapAccess` collected packed positions into a `HashSet<Long>`, so every
+  mapped chunk in the window allocated a `Long` - the dominant cost of a walk that
+  runs on the subscribe tick. Both now return a `LongSet` (`LongOpenHashSet`), as do
+  the two bridges and `ClientConcentration.mappedChunksNearby`, so a hit is stored
+  as the primitive it already is. Empty answers are the shared `LongSets.emptySet()`.
+- **The world map's mapped test allocates nothing.** `WorldMapBridge.isChunkMapped`
+  asked for a one-chunk square, which built a `HashSet`, packed a long and walked
+  every loaded cave layer to answer a yes/no question. `XaeroWorldMapAccess.isMapped`
+  now tests that chunk directly and stops at the first layer that has a tile; the
+  layer walk's callback writes into one reusable probe instead of a fresh set.
+- **Expiry sweeps only current values.** It used to copy the entire cache - up to
+  `maxEntriesPerWorld`, 20 000 by default and 250 000 possible - into a snapshot
+  every second, though only live values can expire and most of a long session's
+  cache is remembered history. It now visits a live-key set (normally a few hundred)
+  and allocates only for what actually expires.
+
+### Fixed
+
+- The cadence estimate and its last sample survived a server restart, so the first
+  sweep of a second world in the same process was timed against the previous
+  world's then widened the client's window for fifteen sweeps.
+- **Logout no longer freezes behind the concentration save.** The final save was
+  written inline on the client thread and then waited on for up to five seconds.
+  It is queued like every other save, and the wait is bounded at 250 ms
+  (`ConcentrationStorage.WRITE_TIMEOUT_MILLIS`); a write that misses the deadline
+  finishes on the writer thread instead. The one place that genuinely needs the
+  file current - a session change that reloads the world immediately - waits on
+  its own write with the same bound.
+
 ## [0.1.0-alpha.11] — 2026-10-26
 
 The request area is a circle instead of a square.

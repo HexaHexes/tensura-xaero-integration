@@ -1,7 +1,8 @@
 package org.bitwisemadness.tensuraxaerointegration.client;
 
-import java.util.HashSet;
-import java.util.Set;
+import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
+import it.unimi.dsi.fastutil.longs.LongSet;
+import it.unimi.dsi.fastutil.longs.LongSets;
 import net.minecraft.client.Minecraft;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.level.Level;
@@ -26,21 +27,27 @@ final class XaeroMinimapAccess {
     private XaeroMinimapAccess() {
     }
 
-    static Set<Long> mappedChunks(ResourceKey<Level> dimension, int centerChunkX, int centerChunkZ, int radius) {
+    /**
+     * Chunks with a written tile inside the square, as packed positions.
+     *
+     * <p>A primitive set: the result is keyed by packed position, so a boxed
+     * {@code Long} per hit would be the walk's whole allocation cost.</p>
+     */
+    static LongSet mappedChunks(ResourceKey<Level> dimension, int centerChunkX, int centerChunkZ, int radius) {
         Minecraft minecraft = Minecraft.getInstance();
         if (minecraft.level == null || !minecraft.level.dimension().equals(dimension)) {
             // The minimap writer is bound to the dimension the player is in.
-            return Set.of();
+            return LongSets.emptySet();
         }
         MinimapWriter writer = writer();
         if (writer == null) {
-            return Set.of();
+            return LongSets.emptySet();
         }
         MinimapChunk[][] blocks = writer.getLoadedBlocks();
         if (blocks == null) {
-            return Set.of();
+            return LongSets.emptySet();
         }
-        Set<Long> mapped = new HashSet<>();
+        LongSet mapped = new LongOpenHashSet();
         for (MinimapChunk[] column : blocks) {
             if (column == null) {
                 continue;
