@@ -4,6 +4,37 @@ All notable changes to this project. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses
 semantic versioning with pre-release suffixes.
 
+## [0.1.0-alpha.14] — 2026-10-27
+
+A stall in front of the pause menu no longer rewinds the freshness clock or throws on
+ the client tick.
+
+### Fixed
+
+- **`IllegalArgumentException: an expiry sweep has an oldest chunk`, thrown on the
+  client tick right after a pause.** Pause time is kept out of the freshness clock -
+  a paused server confirms nothing, so that time must not age a value - but the whole
+  tick gap was credited as paused time whenever the game was paused at *either* end of
+  it. A multi-second stall immediately before the pause menu opened was therefore
+  counted as pause time, which moved the clock **backwards** past stamps it had just
+  taken. `ConcentrationEntry.fresh` deliberately dates a future stamp as stale (the
+  system-clock-changed guard), so the sweep demoted those values, and the digest it
+  built then refused the negative gap it was handed: the exception aborted the rest of
+  that client tick, including the save, the subscription refresh and the repaint. The
+  credit is now bounded by when the pause can have begun: `client/PauseCredit` credits
+  a gap in full only when both of its ends were paused, at most one tick when the pause
+  began inside it, and nothing otherwise.
+- **A swept digest always names a chunk, and never a negative gap.** The cache reports
+  a gap of zero for a value whose stamp is ahead of the clock - such a value is stale,
+  but its gap is unknowable - and the sweep takes its first demoted chunk as the oldest
+  instead of comparing every gap against a negative floor. That pair is what turned a
+  rewound clock into an exception rather than a reported dimming.
+
+### Changed
+
+- `docs/TESTING.md` and `agents/REPO.md` carry the new counts (177 JUnit tests in 14
+  classes), and the JUnit table lists `client/PauseCreditTest`.
+
 ## [0.1.0-alpha.13] — 2026-10-27
 
 `runGameTestServer` no longer wedges, and a run that does wedge now says why.
