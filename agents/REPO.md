@@ -81,3 +81,6 @@ branch `main`).
 - The repo ships `release.yml`: a version in `gradle.properties` without a
   matching `vX.Y.Z` tag is built and published as a GitHub release
   (alpha/nightly opt-in via the `ALPHA_RELEASES` variable, off by default).
+- `publish.yml` publishes the Maven artifact to the org's GitHub Packages
+  registry when that release is published - see the org rulebook for the
+  consumer-side auth details (`PACKAGE_READ_TOKEN`).
