@@ -78,6 +78,43 @@ found by the program-arguments file Gradle hands it
 (`build/moddev/gameTestServerRunProgramArgs.txt`), because its launch target sits
 inside that file rather than on the command line.
 
+### Profiling a client run
+
+`./gradlew runProfileClient` is a dedicated dev client for profiling this mod's own
+client work. It has its own game directory (`run-profile/`) and its own staged mods
+folder (`profileMods`): the Tensura closure the GameTest run uses **plus both Xaero
+mods**, which no server run loads and which plain `runClient` never stages - without
+them the overlay, hover and mixin paths do not run at all. Java Flight Recorder is armed
+at start, so the recording is written when the game exits:
+
+```bash
+./gradlew runProfileClient     # -> build/profiles/client.jfr (under the gitignored build/)
+```
+
+Read it with the JDK 21 `jfr` tool - no viewer and no upload:
+
+```bash
+"$JAVA_HOME/bin/jfr" summary build/profiles/client.jfr
+"$JAVA_HOME/bin/jfr" print --events jdk.ExecutionSample build/profiles/client.jfr \
+    | grep -B3 -A3 bitwisemadness
+```
+
+To capture without quitting the game, dump the live recording on demand - the run prints
+the recording's number and the exact `jcmd` line when it starts:
+
+```bash
+"$JAVA_HOME/bin/jcmd" <pid> JFR.dump name=1 filename=build/profiles/client-now.jfr
+```
+
+A sampler profile attributes time per thread, which is what separates the two paths:
+`Render thread` rows are the frame path (Xaero's per-chunk highlighter calls while it
+builds or repaints a map tile, plus the hover line) and the 20 Hz client tick
+(`ClientConcentration.onClientTick`); `Server thread` rows are the server tick paths.
+
+The caveat matters: this run is the mod's own closure, not a modpack. It can prove what
+this mod costs on its own; the frame-versus-tick question inside a 400-mod pack still
+needs a profile taken from that pack. No CI job uses this run.
+
 ## 2. Latest results (2026-10-27, local, Windows / Git Bash)
 
 | Command | Result |

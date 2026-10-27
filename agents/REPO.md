@@ -26,7 +26,8 @@ third-party API — it records what those jars actually expose and what they do 
 
 **Test:** `./gradlew runGameTestServer` — `ConcentrationGameTests` (6 tests).
 `expectedTests = 6` in `build.gradle` must match the `@GameTest` count. JUnit:
-`./gradlew test` (177 tests, no Minecraft needed).
+`./gradlew test` (177 tests, no Minecraft needed). Profiling a client run, with both
+Xaero mods staged and JFR armed: `./gradlew runProfileClient` (see `docs/TESTING.md`).
 
 **Remote:** `github.com/HexaHexes/tensura-xaero-integration` (public, default
 branch `main`).
