@@ -2,6 +2,8 @@ build/
 .gradle/
 out/
 run/
+run-profile/
+run-profile-server/
 *.iml
 .idea/
 repo/

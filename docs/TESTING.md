@@ -78,6 +78,56 @@ found by the program-arguments file Gradle hands it
 (`build/moddev/gameTestServerRunProgramArgs.txt`), because its launch target sits
 inside that file rather than on the command line.
 
+### Profiling runs
+
+Two dedicated runs profile this mod's own work - one for the client half, one for the
+tick half. Each has its own game directory and its own staged mods folder, so a profile
+never disturbs the GameTest world:
+
+| Run | Game directory | Mods staged | Recording |
+| --- | --- | --- | --- |
+| `./gradlew runProfileClient` | `run-profile/` | `profileMods`: the Tensura closure **plus both Xaero mods** | `build/profiles/client.jfr` |
+| `./gradlew runProfileServer` | `run-profile-server/` | the GameTest closure - Xaero is client-only and must not load on a server | `build/profiles/server.jfr` |
+
+`runProfileClient` matters because plain `runClient` stages neither closure: without the
+Xaero jars the overlay, hover and mixin paths never execute at all. Both runs arm Java
+Flight Recorder at start and write the recording when the process exits.
+
+Three things to know before reading a recording:
+
+- **The client run already contains the server thread.** A dev client starts an
+  integrated server in the same JVM, so `Render thread` rows are the frame path (Xaero's
+  per-chunk highlighter calls while it builds or repaints a map tile, plus the hover
+  line) and the 20 Hz client tick (`ClientConcentration.onClientTick`), while
+  `Server thread` rows are that same session's server tick paths - one process, one
+  recording.
+- **The dedicated server idles without a player.** `ConcentrationServer.onServerTick` and
+  the Tensura chunk-tick observer both return early when nobody is subscribed, so a
+  recording of a server nobody joined holds none of this mod's work. Connect with the
+  pack client, or with `runProfileClient` (Multiplayer, `localhost`), to give it
+  something to do. A dedicated server also needs `eula=true` in
+  `run-profile-server/eula.txt` once before its first launch.
+- **Both runs are the mod's own closure, not a modpack.** They prove what this mod costs
+  on its own; the frame-versus-tick question inside a 400-mod pack still needs a profile
+  taken from that pack.
+
+Read a recording with the JDK 21 `jfr` tool - no viewer and no upload:
+
+```bash
+"$JAVA_HOME/bin/jfr" summary build/profiles/client.jfr
+"$JAVA_HOME/bin/jfr" print --events jdk.ExecutionSample build/profiles/client.jfr \
+    | grep -B3 -A3 bitwisemadness
+```
+
+To capture without quitting, dump the live recording on demand - each run prints its
+recording number and the exact `jcmd` line when it starts:
+
+```bash
+"$JAVA_HOME/bin/jcmd" <pid> JFR.dump name=1 filename=build/profiles/client-now.jfr
+```
+
+No CI job uses either run.
+
 ## 2. Latest results (2026-10-27, local, Windows / Git Bash)
 
 | Command | Result |

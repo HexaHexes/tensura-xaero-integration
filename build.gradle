@@ -16,6 +16,16 @@ java {
     toolchain.languageVersion = JavaLanguageVersion.of(21)
 }
 
+// Where the dedicated profiling runs write their Java Flight Recorder recordings. An
+// absolute path, because a run's working directory is not this project's, and
+// slash-separated so the option's comma-separated value cannot be misread on Windows.
+def profileRecordings = layout.buildDirectory.dir('profiles').get().asFile
+def startFlightRecording = { String name ->
+    '-XX:StartFlightRecording=filename=' +
+            new File(profileRecordings, name).absolutePath.replace(File.separatorChar, '/' as char) +
+            ',dumponexit=true,settings=profile'
+}
+
 // Game tests live in their own source set: they compile against main, and are
 // deliberately NOT part of sourceSets.main - so none of it is packaged into the
 // released jar. Declared before neoForge because the mods block below joins it.
@@ -45,6 +55,36 @@ neoForge {
         gameTestServer {
             type = "gameTestServer"
             gameDirectory = project.layout.projectDirectory.dir('run')
+        }
+
+        // Dedicated profiling run: the same client the jar is built from, in its own
+        // game directory, with the runtime closure AND both Xaero mods staged - no
+        // server run loads the map mods, and the plain runClient stages neither, so
+        // the overlay and hover paths never execute there. Java Flight Recorder is
+        // armed at start and dumps build/profiles/client.jfr when the game exits.
+        // Needs a display, so no CI job uses it. See docs/TESTING.md.
+        profileClient {
+            client()
+            gameDirectory = project.layout.projectDirectory.dir('run-profile')
+            // 128 frames rather than the default 64: the interesting stacks run
+            // through Xaero, the mod, and Minecraft's own render path.
+            jvmArgument '-XX:FlightRecorderOptions=stackdepth=128'
+            jvmArgument(startFlightRecording('client.jfr'))
+        }
+
+        // The same instrumentation for the tick paths, on a dedicated server in its own
+        // game directory. The Xaero mods are client-only and are deliberately absent, so
+        // this one runs the GameTest closure. The server's side answers only for chunks a
+        // player has subscribed to, so a player has to connect for the recording to hold
+        // any of this mod's work - runProfileClient records the integrated server's
+        // thread in the same JVM and needs no second process. Needs eula.txt accepted in
+        // run-profile-server/ once; see docs/TESTING.md.
+        profileServer {
+            server()
+            programArgument '--nogui'
+            gameDirectory = project.layout.projectDirectory.dir('run-profile-server')
+            jvmArgument '-XX:FlightRecorderOptions=stackdepth=128'
+            jvmArgument(startFlightRecording('server.jfr'))
         }
     }
 
@@ -111,10 +151,17 @@ configurations {
     // prepareGametestMods, exactly like the rest of the org's mod repos. Every
     // entry resolves from CurseMaven, so a clean checkout (and CI) works.
     gametestMods
+    // The profiling client's closure: the same set plus both Xaero mods, which are
+    // client-only and must never reach a server run's mods folder.
+    profileMods
     // ManasCore's bundle jar, only used to explode its nested module jars for
     // compilation (see extractManascoreModules).
     manascoreBundle
 }
+
+// The profiling client's closure is the GameTest closure plus both Xaero mods, which
+// are client-only and must never reach a server run's mods folder.
+configurations.profileMods.extendsFrom configurations.gametestMods
 
 // ManasCore ships its modules as FML nested jars under META-INF/jars. FML
 // installs them at runtime, but javac cannot see inside them, and Tensura's
@@ -161,6 +208,10 @@ dependencies {
     gametestMods "curse.maven:smartbrainlib-661293:${smartbrainlib_file_id}"
     gametestMods "curse.maven:terrablender-940057:${terrablender_file_id}"
 
+    // The profiling client additionally loads the two map mods this addon draws on.
+    profileMods "curse.maven:xaeros-minimap-263420:${xaero_minimap_file_id}"
+    profileMods "curse.maven:xaeros-world-map-317780:${xaero_world_map_file_id}"
+
     testImplementation platform('org.junit:junit-bom:5.10.2')
     testImplementation 'org.junit.jupiter:junit-jupiter'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
@@ -183,8 +234,30 @@ tasks.register('prepareGametestMods', Sync) {
     into 'run/mods'
 }
 
+// The profiling client gets its own folder and game directory, so a profile never
+// disturbs the GameTest world and the client-only Xaero jars never reach a server run.
+tasks.register('prepareProfileMods', Sync) {
+    from configurations.profileMods
+    into 'run-profile/mods'
+}
+
+// The profiling server gets its own folder too, and the GameTest closure: Xaero is
+// client-only and would never load on a dedicated server.
+tasks.register('prepareProfileServerMods', Sync) {
+    from configurations.gametestMods
+    into 'run-profile-server/mods'
+}
+
 tasks.matching { it.name == 'runGameTestServer' || it.name == 'runServer' }.configureEach {
     dependsOn 'prepareGametestMods'
+}
+
+tasks.matching { it.name == 'runProfileClient' }.configureEach {
+    dependsOn 'prepareProfileMods'
+}
+
+tasks.matching { it.name == 'runProfileServer' }.configureEach {
+    dependsOn 'prepareProfileServerMods'
 }
 
 test {
