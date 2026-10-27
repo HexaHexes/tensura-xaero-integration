@@ -4,6 +4,42 @@ All notable changes to this project. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses
 semantic versioning with pre-release suffixes.
 
+## [0.1.0-alpha.13] — 2026-10-27
+
+`runGameTestServer` no longer wedges, and a run that does wedge now says why.
+
+### Fixed
+
+- **The GameTest run hung with nothing in the log to explain it.** Every test here
+  uses this mod's own `empty` structure template, and its NBT stored `size` as an
+  int-array. `StructureTemplate` reads that key as a *list of ints*, so the size came
+  back as `0x0x0` and the structure loaded zero-sized. A zero-sized template makes
+  the chunks vanilla force-loads at setup time differ from the chunk the harness
+  waits on before it starts a test: whenever the grid corner landed on a chunk
+  boundary, the run waited forever on a chunk nothing had forced, printing an empty
+  progress bar at 150-200 tps until a human killed it. That is why it looked random
+  - roughly one origin in eight, once per aligned axis - and why a rerun always
+  "fixed" it. `size` is now a proper int list, so the template loads as 8x8x8 and
+  both boxes are the same box. Thirteen consecutive runs passed afterwards, one of
+  them with the test origin sitting exactly on a chunk boundary.
+- **The stall thread dump never found the server on Windows.** It identified the
+  forked GameTest process through `ProcessHandle`, which reports `commandLine()` and
+  `arguments()` as absent for every process on this machine, so the one wedge that
+  actually arrived produced no dump at all. It now falls back to `jps -lm`, which
+  reads the same arguments back out of the JVM itself.
+- **Stale dump watchdogs outlived the builds that made them.** A top-level `def` in a
+  build script is re-created on every build, so the reference used to interrupt the
+  previous watcher was always null; three of them were seen firing into a single run.
+  They are now interrupted by thread name.
+
+### Changed
+
+- `docs/TESTING.md` records the root cause, and `agents/REPO.md` gained the rule not
+  to shrink the template or point the tests back at vanilla's zero-sized
+  `minecraft:empty`.
+- The JUnit counts in `docs/TESTING.md` and `agents/REPO.md` are current (171 tests,
+  13 classes) and the GameTest table lists all six tests.
+
 ## [0.1.0-alpha.12] — 2026-10-26
 
 No behaviour change: the map paint path and the expiry sweep stop allocating and

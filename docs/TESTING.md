@@ -19,17 +19,42 @@ GameTest server that executes zero tests still exits successfully. `expectedTest
 in `build.gradle` must equal the number of `@GameTest` methods in
 `src/gametest/java/.../ConcentrationGameTests.java` — currently `6`.
 
-### When the harness wedges
+### When the harness wedges (root cause found 2026-10-27)
 
 A healthy run takes about 30–45 s including mod loading. Occasionally the server
-registers its tests (`N tests are now running`) and then never advances: it prints
-an empty `[      ]` progress line every few milliseconds, logs no error of any
-kind, and does not stop. The last such run produced 380 000 progress lines in
-eleven minutes, with successive lines 5–10 ms apart — the tick loop was spinning
-at roughly 150 tps and re-printing the bar, not deadlocked. A rerun has always
-cleared it; delete `run/world` if it survives one retry.
+registered its tests (`N tests are now running`) and then never advanced: it
+printed an empty `[      ]` progress line every 3–5 ms, logged no error of any
+kind, and did not stop — 380 000 progress lines in eleven minutes. A rerun
+always cleared it, and deleting `run/world` cleared it too.
 
-The task is therefore killed on a wall-clock timeout (`240 s` by default,
+The cause was the `empty` structure template, not the tests. Every `@GameTest`
+here uses it, and it is this mod's own 8x8x8 air structure at
+`src/gametest/resources/data/tensura_xaero_integration/structure/empty.nbt`
+(`@PrefixGameTestTemplate(false)` keeps the name unprefixed). Its NBT stored
+`size` as an int-array; `StructureTemplate` reads that key as a *list of ints*, so
+the size silently came back as `0x0x0` and everything downstream treated the
+structure as zero-sized:
+
+- setup force-loads the chunks of `getStructureBoundingBox(corner, size, rotation)`
+  — with size 0 the `-1` far corner is then normalised forward, giving
+  `[corner .. corner+1]`;
+- the pre-start gate in `GameTestInfo.tick` waits for
+  `getStructureBoundingBox(structureBlockEntity)` — with size 0 that is
+  `[corner-1 .. corner]`, two blocks *behind* the forced box.
+
+When the grid corner sat on a chunk boundary the two boxes fell in different
+chunks: the gate waited on a chunk nothing had forced (`hasChunk=true`,
+`isPositionEntityTicking=false`, forever), `allMatch` never returned true, no test
+started, and the tick loop spun. That is why it looked random (~1 run in 8, once
+per aligned axis of the random test origin) and why a rerun fixed it. A
+zero-sized template could never start a test whose origin was aligned.
+
+The fix is in the template: `size` is now a proper list of ints, so it loads as
+8x8x8 and the forced box and the waited-on box are the same box — every run,
+whatever origin the server picks. Do not point the tests back at vanilla's
+`minecraft:empty` (also zero-sized) or shrink the template to nothing.
+
+The task is still killed on a wall-clock timeout (`240 s` by default,
 `-PgametestTimeoutSeconds=...` to override), so a wedge fails the build in four
 minutes instead of waiting for a human to notice. When that happens, the
 `reportGametestStall` finalizer says which case it was:
@@ -41,7 +66,10 @@ the harness wedged, not the tests.
 
 A run killed before its tests register prints nothing extra; both cases fail the
 build, and the CI `gametest` job is capped at 15 minutes as a backstop for a hang
-that outlives the Gradle timeout.
+that outlives the Gradle timeout. The timeout is a backstop, not the fix: after
+the template was corrected, thirteen consecutive `runGameTestServer` runs passed,
+one of them with the test origin sitting exactly on a chunk boundary — the
+arrangement that used to wedge every time.
 
 Ten seconds before that kill, the build dumps every thread of the forked server to
 `run/logs/gametest-thread-dump.txt` — only when the log shows its tests running and
@@ -50,18 +78,18 @@ found by the program-arguments file Gradle hands it
 (`build/moddev/gameTestServerRunProgramArgs.txt`), because its launch target sits
 inside that file rather than on the command line.
 
-## 2. Latest results (2026-10-25, local, Windows / Git Bash)
+## 2. Latest results (2026-10-27, local, Windows / Git Bash)
 
 | Command | Result |
 | --- | --- |
-| `./gradlew test` | **130 tests, 0 failures, 0 errors** (10 classes) |
+| `./gradlew test` | **171 tests, 0 failures, 0 errors** (13 classes) |
 | `./gradlew build` | **BUILD SUCCESSFUL**, jar produced |
 | `./gradlew runGameTestServer` | **6 tests ran, all passed** — `All 6 required tests passed :)`, task reported `GameTest OK: all 6 tests passed` |
 
 These are the only runs backing the claims in this repository. Nothing
 client-rendering related was verified — see §6.
 
-## 3. JUnit suite (130 tests)
+## 3. JUnit suite (171 tests)
 
 All of these compile and run without Minecraft because the logic sits in
 Minecraft-free classes.
@@ -71,12 +99,15 @@ Minecraft-free classes.
 | `concentration/ConcentrationThresholdsTest` | band classification, exact boundaries (inclusive lower band), baseline-relative maths, normal↔elevated transitions both ways, invalid baseline and non-finite input, threshold ordering validation |
 | `concentration/OverlayPaletteTest` | default palette, `#RRGGBB` parsing incl. malformed input, opacity clamping, Xaero colour encoding (`blue<<24 \| green<<16 \| red<<8 \| alpha`), zero-alpha normal chunks |
 | `cache/CacheKeyAndCacheTest` | key isolation across world token, dimension and coordinates; value/replace/invalidate/clear; missing-data vs valid-zero distinction; bounded size and eviction |
+| `cache/RegionKeyMemoTest` | the memoised region key: a repeat ask returns the same instance, a different region, dimension or sign rebuilds, one entry only |
 | `refresh/RefreshSchedulingTest` | `UpdateQueue` change detection and deduplication, per-chunk minimum interval (delayed, never dropped), bounded drain, `retainOnly` pruning, `ReconcileCursor` rotation and budget covering the whole set |
+| `refresh/CadenceEstimateTest` | the server's cadence promise: the nominal interval before it has measured itself, a stall widening it (never below nominal), the worst recent sweep winning, the pause cap, recovery forgetting a stall, zero-length and impossible samples rejected |
 | `client/ClientConcentrationStoreTest` | mapped-only ingress (an unmapped chunk cannot be stored even when offered), server-supplied bands (including an unbanded value), live→last-known demotion and promotion, the wall-clock freshness window derived from the server's measured cadence (including a stalled server), stale/unavailable handling, replay that never overwrites live data and keeps the stored band, region version bumps on visible changes only, `clearServerInfo` — all on an injected clock, so no test sleeps |
 | `tiers/TierParserTest` | datapack schema: baseline-only and per-dimension ladders, multiple dimensions per file, palette files, partial or non-increasing ladders rejected, unlisted dimensions falling back, unclassifiable dimensions, broken files skipped without emptying the table |
 | `cache/ConcentrationFileFormatTest` | write/read round trip, empty file, wrong magic, unknown version (incl. a version-1 file), row limit, negative count, non-finite value, impossible band code, truncation, invalid row construction |
 | `client/ConcentrationStorageTest` | save and load a world, queued save plus flush, a save that must be visible before it returns, a zero-deadline flush, missing and corrupt files read as no history, per-world name uniqueness and sanitising (no path escape) |
 | `net/PackedChunkPosTest` | packing/unpacking incl. negative and extreme coordinates |
+| `util/ChunkRadiusTest` | the circular request radius: the player's own chunk, exactly-on-radius included, one chunk past and square corners excluded, centred on the player, no overflow at a million chunks, negative radius rejected |
 | `util/ConcentrationTextTest` | hover line formatting, number precision, with and without a classification, unavailable state |
 
 ## 4. GameTest suite (6 tests)
@@ -91,6 +122,7 @@ these exercise the actual `ChunkStorage` API rather than a stub.
 | `loaded_chunk_has_a_concentration` | a loaded chunk answers with a finite, non-negative authoritative value |
 | `unloaded_chunk_is_unavailable` | an unloaded chunk reports *unavailable*, and reading it does not load it |
 | `coordinator_ticks_without_players` | the coordinator is started by the server lifecycle, ticks with no players without throwing, and holds no subscriptions |
+| `tier_datapack_is_loaded` | the datapack reaches the server: dimensions are described, the overworld's described baseline is used and 600 classifies as elevated, and `tensura:hell` gets its own ladder instead of the default |
 | `server_config_is_usable` | the server config is attached and its bounds are positive |
 
 ## 5. What is not automated

@@ -26,7 +26,7 @@ third-party API — it records what those jars actually expose and what they do 
 
 **Test:** `./gradlew runGameTestServer` — `ConcentrationGameTests` (6 tests).
 `expectedTests = 6` in `build.gradle` must match the `@GameTest` count. JUnit:
-`./gradlew test` (130 tests, no Minecraft needed).
+`./gradlew test` (171 tests, no Minecraft needed).
 
 **Remote:** `github.com/HexaHexes/tensura-xaero-integration` (public, default
 branch `main`).
@@ -50,6 +50,13 @@ branch `main`).
 - **Never substitute `AreaMagiculeHelper.getMagicule` for a chunk query** — it
   returns the baseline when the chunk is not loaded, which turns "no data" into a
   fake value.
+- **The gametest `empty` template must stay non-zero-sized.**
+  `src/gametest/resources/data/tensura_xaero_integration/structure/empty.nbt` is an
+  8x8x8 air structure that declares `size` as a list of ints. A zero-sized
+  template — vanilla's `minecraft:empty`, or this file with a `size` written as an
+  int-array — makes the box the harness force-loads differ from the box it waits
+  on, and the run hangs forever whenever the random test origin is chunk-aligned.
+  `docs/TESTING.md` has the full account.
 - **Privacy rule:** a chunk that is not mapped must never be rendered, tooltipped,
   cached or servery. `ClientConcentrationStore.offer` refuses unmapped writes and
   `ConcentrationServer` only answers subscribed chunks — do not add a path around

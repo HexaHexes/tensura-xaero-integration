@@ -202,9 +202,6 @@ test {
 // with -PgametestTimeoutSeconds=...
 def gametestTimeoutSeconds = (project.findProperty('gametestTimeoutSeconds') ?: '240') as int
 
-// The stall-dump watcher, so a later run can stop the previous run's copy.
-def gametestWatchdog = null
-
 // Runs even when the run task was killed by its timeout, which is exactly the case
 // where the grader above never gets a chance to explain itself.
 def reportGametestStall = tasks.register('reportGametestStall') {
@@ -246,8 +243,15 @@ def dumpWedgedGametestThreads = {
         return
     }
     // The forked server is identified by the program-arguments file Gradle hands it -
-    // the launch target itself sits inside that file, not on the command line. The
-    // dev-launch main class is the fallback when the file name ever changes.
+    // the launch target itself sits inside that file, not on the command line.
+    //
+    // On Windows the ProcessHandle route finds nothing at all: this JVM reports
+    // commandLine() and arguments() as absent for every process on the machine (0 of
+    // 352 when measured), which is why the first real wedge arrived without a dump.
+    // jps reads the same arguments back from the JVM itself, so it is the fallback
+    // that actually works here: `jps -lm` prints the pid, the dev-launch main class
+    // and the @argfile Gradle passed as the program arguments.
+    def pid = null
     def candidates = []
     def fallbacks = []
     java.lang.ProcessHandle.allProcesses().forEach { handle ->
@@ -262,20 +266,40 @@ def dumpWedgedGametestThreads = {
         }
     }
     def found = candidates ?: fallbacks
-    if (!found) {
+    if (found) {
+        pid = found.max { handle ->
+            handle.info().startInstant().orElse(java.time.Instant.EPOCH)
+        }.pid()
+    } else {
+        def jps = [new File(javaHome, 'bin/jps.exe'), new File(javaHome, 'bin/jps')]
+                .find { it.canExecute() }
+        if (jps != null) {
+            def listing = new ProcessBuilder(jps.absolutePath, '-lm')
+                    .redirectErrorStream(true).start()
+            def lines = listing.inputStream.getText('UTF-8').readLines()
+            listing.waitFor()
+            // The unique argfile name first; the dev-launch main class only if the
+            // file name ever changes.
+            def line = lines.find { it.contains('gameTestServerRunProgramArgs.txt') }
+                    ?: lines.find { it.contains('net.neoforged.devlaunch.Main') }
+            if (line != null) {
+                def token = line.trim().tokenize(' ')[0]
+                if (token.isLong()) {
+                    pid = token as long
+                }
+            }
+        }
+    }
+    if (pid == null) {
         logger.warn('GameTest looks wedged but its server process was not found; no thread dump taken')
         return
     }
-    def server = found.max { handle ->
-        handle.info().startInstant().orElse(java.time.Instant.EPOCH)
-    }
     def target = file('run/logs/gametest-thread-dump.txt')
-    def dump = new ProcessBuilder(jstack.absolutePath, '-l', server.pid().toString())
-            .redirectErrorStream(true)
-            .start()
+    def dump = new ProcessBuilder(jstack.absolutePath, '-l', pid.toString())
+            .redirectErrorStream(true).start()
     target.text = dump.inputStream.getText('UTF-8')
     dump.waitFor()
-    logger.lifecycle("GameTest looks wedged; thread dump of pid ${server.pid()} written to ${target}")
+    logger.lifecycle("GameTest looks wedged; thread dump of pid ${pid} written to ${target}")
 }
 
 // Grade the run on the log summary, not the exit code: the GameTestServer prints
@@ -291,9 +315,14 @@ tasks.matching { it.name == 'runGameTestServer' }.configureEach {
         // reads it, and a killed run would otherwise be judged on its predecessor.
         file('run/logs/latest.log').delete()
         file('run/logs/gametest-thread-dump.txt').delete()
-        // Watchdog for the stall below: dump threads ten seconds before the kill. Only
-        // one per build daemon, so a run does not inherit its predecessor's watcher.
-        gametestWatchdog?.interrupt()
+        // Watchdog for the stall below: dump threads ten seconds before the kill. Its
+        // predecessor is reaped by name, not by a variable: a top-level `def` in a
+        // build script is re-created on every build, so a reference is always null
+        // once the build that made it has ended and the old watchers kept firing into
+        // later runs (three of them did, during one wedge).
+        Thread.getAllStackTraces().keySet()
+                .findAll { it.name == 'gametest-thread-dump' && !it.isInterrupted() }
+                .each { it.interrupt() }
         def delaySeconds = Math.max(30, gametestTimeoutSeconds - 10)
         def watchdog = new Thread({
             try {
@@ -307,7 +336,6 @@ tasks.matching { it.name == 'runGameTestServer' }.configureEach {
         }, 'gametest-thread-dump')
         watchdog.daemon = true
         watchdog.start()
-        gametestWatchdog = watchdog
     }
     doLast {
         def log = file('run/logs/latest.log')
