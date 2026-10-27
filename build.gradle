@@ -16,13 +16,15 @@ java {
     toolchain.languageVersion = JavaLanguageVersion.of(21)
 }
 
-// Where the dedicated profiling run writes its Java Flight Recorder recording. An
+// Where the dedicated profiling runs write their Java Flight Recorder recordings. An
 // absolute path, because a run's working directory is not this project's, and
 // slash-separated so the option's comma-separated value cannot be misread on Windows.
-def profileRecording = layout.buildDirectory.file('profiles/client.jfr').get().asFile
-def startFlightRecording = '-XX:StartFlightRecording=filename=' +
-        profileRecording.absolutePath.replace(File.separatorChar, '/' as char) +
-        ',dumponexit=true,settings=profile'
+def profileRecordings = layout.buildDirectory.dir('profiles').get().asFile
+def startFlightRecording = { String name ->
+    '-XX:StartFlightRecording=filename=' +
+            new File(profileRecordings, name).absolutePath.replace(File.separatorChar, '/' as char) +
+            ',dumponexit=true,settings=profile'
+}
 
 // Game tests live in their own source set: they compile against main, and are
 // deliberately NOT part of sourceSets.main - so none of it is packaged into the
@@ -67,7 +69,22 @@ neoForge {
             // 128 frames rather than the default 64: the interesting stacks run
             // through Xaero, the mod, and Minecraft's own render path.
             jvmArgument '-XX:FlightRecorderOptions=stackdepth=128'
-            jvmArgument(startFlightRecording)
+            jvmArgument(startFlightRecording('client.jfr'))
+        }
+
+        // The same instrumentation for the tick paths, on a dedicated server in its own
+        // game directory. The Xaero mods are client-only and are deliberately absent, so
+        // this one runs the GameTest closure. The server's side answers only for chunks a
+        // player has subscribed to, so a player has to connect for the recording to hold
+        // any of this mod's work - runProfileClient records the integrated server's
+        // thread in the same JVM and needs no second process. Needs eula.txt accepted in
+        // run-profile-server/ once; see docs/TESTING.md.
+        profileServer {
+            server()
+            programArgument '--nogui'
+            gameDirectory = project.layout.projectDirectory.dir('run-profile-server')
+            jvmArgument '-XX:FlightRecorderOptions=stackdepth=128'
+            jvmArgument(startFlightRecording('server.jfr'))
         }
     }
 
@@ -224,12 +241,23 @@ tasks.register('prepareProfileMods', Sync) {
     into 'run-profile/mods'
 }
 
+// The profiling server gets its own folder too, and the GameTest closure: Xaero is
+// client-only and would never load on a dedicated server.
+tasks.register('prepareProfileServerMods', Sync) {
+    from configurations.gametestMods
+    into 'run-profile-server/mods'
+}
+
 tasks.matching { it.name == 'runGameTestServer' || it.name == 'runServer' }.configureEach {
     dependsOn 'prepareGametestMods'
 }
 
 tasks.matching { it.name == 'runProfileClient' }.configureEach {
     dependsOn 'prepareProfileMods'
+}
+
+tasks.matching { it.name == 'runProfileServer' }.configureEach {
+    dependsOn 'prepareProfileServerMods'
 }
 
 test {
