@@ -198,6 +198,24 @@ class ClientConcentrationStoreTest {
     }
 
     @Test
+    void a_pause_credit_that_outruns_the_clock_still_names_a_chunk() {
+        ClientConcentrationStore store = newStore();
+        store.offer(CHUNK, true, 600.0, SLIGHTLY);
+
+        // The client's tick gap was swallowed by a pause credit larger than the wall
+        // time it covered (a stall before the pause menu opened), so now() sits
+        // behind the stamp just taken. The value is stale - the clock dates its
+        // confirmation in the future - and the sweep must still name it.
+        advance(500);
+        store.addPausedMillis(5_000);
+
+        ClientConcentrationStore.Expiry expiry = store.expire(store.staleAfterMillis()).orElseThrow();
+        assertEquals(1, expiry.count());
+        assertEquals(CHUNK, expiry.oldest(), "a sweep that demoted a chunk has to name one");
+        assertEquals(0, expiry.oldestAgeMillis(), "the gap is unknowable, so it is reported as zero");
+    }
+
+    @Test
     void clearing_server_info_forgets_paused_time() {
         ClientConcentrationStore store = newStore();
         store.addPausedMillis(4_000);

@@ -82,14 +82,14 @@ inside that file rather than on the command line.
 
 | Command | Result |
 | --- | --- |
-| `./gradlew test` | **171 tests, 0 failures, 0 errors** (13 classes) |
+| `./gradlew test` | **177 tests, 0 failures, 0 errors** (14 classes) |
 | `./gradlew build` | **BUILD SUCCESSFUL**, jar produced |
 | `./gradlew runGameTestServer` | **6 tests ran, all passed** — `All 6 required tests passed :)`, task reported `GameTest OK: all 6 tests passed` |
 
 These are the only runs backing the claims in this repository. Nothing
 client-rendering related was verified — see §6.
 
-## 3. JUnit suite (171 tests)
+## 3. JUnit suite (177 tests)
 
 All of these compile and run without Minecraft because the logic sits in
 Minecraft-free classes.
@@ -106,6 +106,7 @@ Minecraft-free classes.
 | `tiers/TierParserTest` | datapack schema: baseline-only and per-dimension ladders, multiple dimensions per file, palette files, partial or non-increasing ladders rejected, unlisted dimensions falling back, unclassifiable dimensions, broken files skipped without emptying the table |
 | `cache/ConcentrationFileFormatTest` | write/read round trip, empty file, wrong magic, unknown version (incl. a version-1 file), row limit, negative count, non-finite value, impossible band code, truncation, invalid row construction |
 | `client/ConcentrationStorageTest` | save and load a world, queued save plus flush, a save that must be visible before it returns, a zero-deadline flush, missing and corrupt files read as no history, per-world name uniqueness and sanitising (no path escape) |
+| `client/PauseCreditTest` | which part of a tick gap counts as paused time: a gap paused at both ends in full, a pause that begins inside a stall capped at one tick, a gap the server ran through not at all, a frozen pause credited on resume, a stopped or backwards clock credited nothing |
 | `net/PackedChunkPosTest` | packing/unpacking incl. negative and extreme coordinates |
 | `util/ChunkRadiusTest` | the circular request radius: the player's own chunk, exactly-on-radius included, one chunk past and square corners excluded, centred on the player, no overflow at a million chunks, negative radius rejected |
 | `util/ConcentrationTextTest` | hover line formatting, number precision, with and without a classification, unavailable state |
