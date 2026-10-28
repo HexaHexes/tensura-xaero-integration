@@ -511,15 +511,17 @@ public final class ClientConcentration {
      * Moves time spent with the integrated server paused out of the freshness
      * clock: a paused server confirms nothing, so that time cannot age a value.
      *
-     * <p>The interval is credited on the first paused tick and again on the tick
-     * that resumes, so it is counted whether or not client ticks keep firing while
-     * the pause menu is open. Over-crediting is bounded by one tick per pause.</p>
+     * <p>The pause is credited through {@link PauseCredit}, so the time before the
+     * pause began is never counted as paused: a stall that happened while the server
+     * was still running has to age values, and crediting it moved the clock
+     * backwards over stamps that had just been taken.</p>
      */
     private void accountForPause(Minecraft minecraft) {
         long nowMillis = System.currentTimeMillis();
         boolean paused = minecraft.isPaused();
-        if (this.lastTickMillis > 0L && (paused || this.pausedAtLastTick)) {
-            store().addPausedMillis(nowMillis - this.lastTickMillis);
+        if (this.lastTickMillis > 0L) {
+            store().addPausedMillis(
+                    PauseCredit.creditMillis(this.pausedAtLastTick, paused, nowMillis - this.lastTickMillis));
         }
         this.lastTickMillis = nowMillis;
         this.pausedAtLastTick = paused;

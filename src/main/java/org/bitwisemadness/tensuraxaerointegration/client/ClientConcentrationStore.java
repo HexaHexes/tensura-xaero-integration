@@ -422,7 +422,9 @@ public final class ClientConcentrationStore {
      *
      * @param count           how many values became last known
      * @param oldest          the chunk that had gone longest without a confirmation
-     * @param oldestAgeMillis that chunk's real gap, measured before it was demoted
+     * @param oldestAgeMillis that chunk's real gap, measured before it was demoted;
+     *                        {@code 0} when the clock had gone backwards, which
+     *                        makes the gap unknowable
      */
     public record Expiry(int count, ChunkCacheKey oldest, long oldestAgeMillis) {
 
@@ -459,10 +461,13 @@ public final class ClientConcentrationStore {
             return Optional.empty();
         }
         ChunkCacheKey oldest = null;
-        long oldestAge = -1L;
+        long oldestAge = 0L;
         for (ConcentrationCache.Expired value : expired) {
             bumpRegion(value.key());
-            if (value.ageMillis() > oldestAge) {
+            // A sweep of zero-gap values still has an oldest chunk - the record
+            // rejects a sweep that names none, so the first entry is always taken
+            // rather than compared against a negative floor.
+            if (oldest == null || value.ageMillis() > oldestAge) {
                 oldestAge = value.ageMillis();
                 oldest = value.key();
             }

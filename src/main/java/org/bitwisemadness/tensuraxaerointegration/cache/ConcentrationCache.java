@@ -215,7 +215,12 @@ public final class ConcentrationCache {
             if (stale == null) {
                 stale = new ArrayList<>();
             }
-            stale.add(new Expired(key, nowMillis - entry.stampMillis()));
+            // A clock that has gone backwards - a system time change, or more
+            // commonly a pause credit that outran the wall clock - leaves the stamp
+            // in the future. The value is stale and is demoted, but its gap cannot
+            // be measured: report a zero gap rather than a negative age, which
+            // callers would read as "no time has passed".
+            stale.add(new Expired(key, Math.max(0L, nowMillis - entry.stampMillis())));
         }
         if (stale == null) {
             return List.of();
