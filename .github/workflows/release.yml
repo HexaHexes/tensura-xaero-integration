@@ -1,12 +1,22 @@
 name: Release
 
-# Mirrors the org's release workflow (tiered-echoes): every push to the default
-# branch builds and verifies the tree, then tags and publishes whatever the
-# version says it is. Alphas are opt-in through the ALPHA_RELEASES repository
-# variable so a push that did not bump the version does not publish on its own.
+# Runs on pushes to the default branch: when gradle.properties carries a version
+# that has no matching v-published release yet, build the jar and publish it as a
+# GitHub release for that tag. Everything the mod ships rides inside that jar, so
+# there is no separate archive to assemble.
 #
-# Deliberately no CurseForge dispatch: this repo has no CurseForge project yet,
-# and a workflow that calls a missing one is worse than no call at all.
+# Promoted from tensura-iaf-growth, the org's reference implementation (tracked by
+# neoforge-mod-template #4). Two deliberate differences from a mod repo's copy:
+#
+#   - the jar name is derived from mod_id instead of written out, because this file
+#     is copied into repos whose archivesName follows their own mod_id, so a rename
+#     needs no edit here;
+#   - the release notes are an example - edit them when promoting this file into a
+#     mod. They are player-facing, and the README rule about that applies.
+#
+# Pre-releases are opt-in: an -alpha or -beta version publishes only when the
+# repository variable ALPHA_RELEASES is true, so a pre-release train cannot reach
+# the releases page by accident.
 
 on:
   push:
@@ -15,24 +25,20 @@ on:
 
 permissions:
   contents: write
+  # Dispatching the publishing workflows below needs actions: write - an
+  # explicit permissions block zeroes every scope it does not name.
+  actions: write
 
-# Serialize releases. Two rapid pushes must queue rather than race for the same
-# tag, and a cancelled release is worse than a late one.
 concurrency:
-  group: release-main
+  group: release
   cancel-in-progress: false
 
 jobs:
   release:
-    name: build-tag-release
+    name: release
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-        with:
-          # Full history is mandatory: the changelog range and the previous
-          # version are both read from git, and a shallow clone would produce an
-          # empty release body while still succeeding.
-          fetch-depth: 0
 
       - name: Set up JDK 21
         uses: actions/setup-java@v6
@@ -41,241 +47,101 @@ jobs:
           java-version: '21'
           cache: gradle
 
-      # Annotated tags record who created them, and a runner ships with no git
-      # identity.
-      - name: Configure git identity
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-      - name: Determine release channel
-        id: channel
+      - name: Resolve the version
+        id: resolve
         env:
+          GH_TOKEN: ${{ github.token }}
           ALPHA_RELEASES: ${{ vars.ALPHA_RELEASES }}
         run: |
           set -euo pipefail
 
-          NEW_VERSION=$(grep '^mod_version=' gradle.properties | cut -d= -f2 | tr -d '[:space:]')
-          OLD_VERSION=$(git show HEAD~1:gradle.properties | grep '^mod_version=' | cut -d= -f2 | tr -d '[:space:]')
-          SHORT_SHA=$(git rev-parse --short=7 HEAD)
+          VERSION=$(grep '^mod_version=' gradle.properties | cut -d= -f2 | tr -d '[:space:]')
+          echo "mod version: $VERSION"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
-          echo "mod_version: $OLD_VERSION -> $NEW_VERSION"
-          echo "commit: $SHORT_SHA"
+          SKIP=false
 
-          if [ "$NEW_VERSION" = "$OLD_VERSION" ]; then
-            CHANNEL="alpha"
-            REASON="no version bump since the previous commit"
-            TAG="v${NEW_VERSION}+g${SHORT_SHA}"
-          else
-            case "$NEW_VERSION" in
-              *-alpha*|*-Alpha*|*-ALPHA*)
-                CHANNEL="alpha"
-                REASON="version bumped with an -alpha pre-release suffix"
-                TAG="v${NEW_VERSION}+g${SHORT_SHA}"
-                ;;
-              *-*)
-                CHANNEL="beta"
-                REASON="version bumped with a pre-release suffix"
-                TAG="v${NEW_VERSION}"
-                ;;
-              *)
-                CHANNEL="stable"
-                REASON="version bumped with no pre-release suffix"
-                TAG="v${NEW_VERSION}"
-                ;;
-            esac
-
-            # Defense in depth: CI already rejects an isolated beta or stable
-            # bump that carries other files, but publishing an ambiguous stable
-            # release is the exact failure that rule exists to prevent.
-            if [ "$CHANNEL" != "alpha" ]; then
-              EXTRA=$(git show --name-only --format= HEAD | grep -v '^gradle\.properties$' | grep -v '^$' || true)
-              if [ -n "$EXTRA" ]; then
-                echo "::error::Refusing to publish a $CHANNEL release."
-                echo "::error::A $CHANNEL bump must be an isolated version bump, but this commit also changed:"
-                echo "$EXTRA"
-                exit 1
-              fi
-            fi
+          # Ask GitHub rather than the local refs: actions/checkout does not
+          # fetch tags by default, so a refs/tags probe would never fire and
+          # the publish step would collide with the release it is meant to skip.
+          if gh release view "v$VERSION" >/dev/null 2>&1; then
+            echo "Release v$VERSION already exists; nothing to release."
+            SKIP=true
           fi
 
-          echo "channel: $CHANNEL ($REASON)"
-          echo "tag: $TAG"
-
-          # Unset counts as off: a missing nightly costs one release, an
-          # unwanted published tag costs cleanup in the wild.
-          ALPHA_ON=$(printf '%s' "${ALPHA_RELEASES:-}" | tr '[:upper:]' '[:lower:]')
-          case "$ALPHA_ON" in
-            true|1|yes|on) ALPHA_ON="true" ;;
-            *)             ALPHA_ON="false" ;;
+          case "$VERSION" in
+            *-alpha*|*-beta*)
+              if [ "${ALPHA_RELEASES:-false}" != "true" ]; then
+                echo "$VERSION is a pre-release and the ALPHA_RELEASES variable is not enabled; skipping."
+                SKIP=true
+              fi ;;
           esac
 
-          if [ "$CHANNEL" = "alpha" ] && [ "$ALPHA_ON" != "true" ]; then
-            RELEASE="false"
-            echo "::notice::Skipping the $CHANNEL release for $TAG. Set the ALPHA_RELEASES repository variable to true to publish alphas."
-          else
-            RELEASE="true"
-          fi
+          echo "skip=$SKIP" >> "$GITHUB_OUTPUT"
 
-          {
-            echo "channel=$CHANNEL"
-            echo "tag=$TAG"
-            echo "version=$NEW_VERSION"
-            echo "release=$RELEASE"
-          } >> "$GITHUB_OUTPUT"
-
-      - name: Build and run JUnit suite
+      - name: Build the jar
+        if: steps.resolve.outputs.skip == 'false'
         run: ./gradlew build --no-daemon --stacktrace
 
-      - name: Assert the JUnit suite actually ran
-        run: |
-          if [ ! -d build/test-results/test ]; then
-            echo "::error::Refusing to release: no test results directory. :test was NO-SOURCE."
-            exit 1
-          fi
-          TOTAL=$(grep -ho 'tests="[0-9]*"' build/test-results/test/TEST-*.xml 2>/dev/null \
-                  | grep -o '[0-9]*' | awk '{s+=$1} END {print s+0}')
-          FAILED=$(grep -ho 'failures="[0-9]*"' build/test-results/test/TEST-*.xml 2>/dev/null \
-                   | grep -o '[0-9]*' | awk '{s+=$1} END {print s+0}')
-          ERRORED=$(grep -ho 'errors="[0-9]*"' build/test-results/test/TEST-*.xml 2>/dev/null \
-                    | grep -o '[0-9]*' | awk '{s+=$1} END {print s+0}')
-          echo "tests=$TOTAL failures=$FAILED errors=$ERRORED"
-          if [ "$TOTAL" -le 0 ]; then
-            echo "::error::Refusing to release: the JUnit suite ran 0 tests."
-            exit 1
-          fi
-          if [ "$FAILED" -gt 0 ] || [ "$ERRORED" -gt 0 ]; then
-            echo "::error::Refusing to release: JUnit reported $FAILED failures and $ERRORED errors."
-            exit 1
-          fi
-
-      # The task exit code is not a reliable pass signal; the log line is.
-      - name: Run GameTest server
-        run: |
-          set +e
-          ./gradlew runGameTestServer --no-daemon 2>&1 | tee gametest.log
-          echo "gradle exit code: $?" >> gametest.log
-
-      - name: Assert GameTests ran and passed
-        run: |
-          LINE=$(grep -E "All [0-9]+ required tests passed" gametest.log || true)
-          if [ -z "$LINE" ]; then
-            echo "::error::Refusing to release: GameTest run never reported a result."
-            echo "--- last 120 lines ---"
-            tail -120 gametest.log
-            exit 1
-          fi
-          COUNT=$(echo "$LINE" | sed -E 's/.*All ([0-9]+) required tests passed.*/\1/')
-          echo "reported: $LINE"
-          if [ "$COUNT" -le 0 ]; then
-            echo "::error::Refusing to release: GameTest server ran 0 tests."
-            exit 1
-          fi
-
-      - name: Generate changelog
-        id: changelog
-        if: steps.channel.outputs.release == 'true'
-        env:
-          CHANNEL: ${{ steps.channel.outputs.channel }}
-        run: |
-          set -euo pipefail
-
-          # Alphas span the latest tag of any kind; betas and stables span the
-          # last stable tag so a clean release is cumulative.
-          if [ "$CHANNEL" = "alpha" ]; then
-            BASELINE=$(git tag --list 'v*' --sort=-creatordate | head -1 || true)
-          else
-            BASELINE=$(git tag --list 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1 || true)
-          fi
-
-          if [ -z "$BASELINE" ]; then
-            echo "no baseline tag; changelog spans the full history"
-            BODY="Initial release."
-            BODY+=$'\n\n'
-            BODY+=$(git log --pretty=format:"- %s" HEAD)
-          else
-            echo "changelog baseline: $BASELINE"
-            COMMITS=$(git log --pretty=format:"- %s" "${BASELINE}..HEAD" || true)
-            if [ -z "$COMMITS" ]; then
-              BODY="No user-facing changes since ${BASELINE}."
-            else
-              BODY="Changes since ${BASELINE}:"
-              BODY+=$'\n\n'
-              BODY+="$COMMITS"
-            fi
-          fi
-
-          {
-            echo "body<<EOF"
-            echo "$BODY"
-            echo "EOF"
-          } >> "$GITHUB_OUTPUT"
-
-          echo "--- changelog ---"
-          echo "$BODY"
-
-      - name: Create or update annotated tag
-        if: steps.channel.outputs.release == 'true'
-        env:
-          TAG: ${{ steps.channel.outputs.tag }}
-        run: |
-          set -euo pipefail
-
-          # Multi-line text goes through a file; shell quoting it on the command
-          # line would silently truncate the tag message.
-          cat > tag-message.md <<EOF
-          ${{ steps.changelog.outputs.body }}
-          EOF
-
-          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" > /dev/null 2>&1; then
-            echo "Tag $TAG already exists; force-updating so a re-run is idempotent."
-            git tag -fa "$TAG" -F tag-message.md
-          else
-            git tag -a "$TAG" -F tag-message.md
-          fi
-
-          git push -f origin "refs/tags/$TAG"
-
-      - name: Create or update GitHub release
-        if: steps.channel.outputs.release == 'true'
+      - name: Publish the release
+        if: steps.resolve.outputs.skip == 'false'
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ steps.channel.outputs.tag }}
-          CHANNEL: ${{ steps.channel.outputs.channel }}
-          VERSION: ${{ steps.channel.outputs.version }}
+          VERSION: ${{ steps.resolve.outputs.version }}
         run: |
           set -euo pipefail
 
-          SHORT_SHA=$(git rev-parse --short=7 HEAD)
-          mkdir -p staged
-
-          # Two alphas of the same version are otherwise indistinguishable, so an
-          # alpha asset carries the commit it was built from.
-          if [ "$CHANNEL" = "alpha" ]; then
-            ASSET="staged/tensura_xaero_integration-${VERSION}+g${SHORT_SHA}.jar"
-          else
-            ASSET="staged/tensura_xaero_integration-${VERSION}.jar"
-          fi
-          cp build/libs/tensura_xaero_integration-*.jar "$ASSET"
-
-          PRERELEASE_FLAG=""
-          if [ "$CHANNEL" != "stable" ]; then
-            PRERELEASE_FLAG="--prerelease"
+          MOD_ID=$(grep '^mod_id=' gradle.properties | cut -d= -f2 | tr -d '[:space:]')
+          JAR="build/libs/$MOD_ID-$VERSION.jar"
+          if [ ! -f "$JAR" ]; then
+            echo "::error::Expected $JAR after the build; found:"
+            ls -l build/libs
+            exit 1
           fi
 
-          cat > release-notes.md <<EOF
-          ${{ steps.changelog.outputs.body }}
-          EOF
+          # Player-facing notes: what the mod adds and how to install it. Rewrite for
+          # your mod when promoting this file - the README rule about player-facing
+          # text applies here too.
+          NOTES="Tensura Xaero Integration, version $VERSION.
+          Shows Tensura: Reincarnated''s ambient chunk magicule as a translucent
+          overlay on Xaero''s Minimap and World Map, and reports the hovered
+          chunk''s concentration. Requires Tensura: Reincarnated and Xaero''s
+          Minimap and World Map - see the README."
 
-          if gh release view "$TAG" > /dev/null 2>&1; then
-            echo "Release $TAG already exists; updating it so a re-run is idempotent."
-            gh release edit "$TAG" --notes-file release-notes.md $PRERELEASE_FLAG
-            gh release upload "$TAG" "$ASSET" --clobber
-          else
-            gh release create "$TAG" "$ASSET" \
-              --title "$TAG" \
-              --notes-file release-notes.md \
-              $PRERELEASE_FLAG
+          PRERELEASE=""
+          case "$VERSION" in
+            *-alpha*|*-beta*) PRERELEASE="--prerelease" ;;
+          esac
+
+          gh release create "v$VERSION" "$JAR" \
+            --title "v$VERSION" \
+            --notes "$NOTES" \
+            $PRERELEASE
+
+      # GitHub refuses to cascade workflow runs started by the default
+      # GITHUB_TOKEN, so the "release: published" trigger only ever fires for
+      # releases created by hand. Dispatch the publishing workflows directly
+      # instead - they are deliberately separate from this one, so a Modrinth
+      # or Packages outage never fails the release itself. Workflows that are
+      # not present in a repo are skipped, so this file needs no edit when a
+      # repo has not adopted one of them yet.
+      - name: Dispatch the publishing workflows
+        if: steps.resolve.outputs.skip == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.resolve.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          if [ -f .github/workflows/publish.yml ]; then
+            gh workflow run publish.yml
+            echo "Dispatched publish.yml."
           fi
-
-          echo "Published $TAG as a $CHANNEL release."
+          if [ -f .github/workflows/modrinth.yml ]; then
+            gh workflow run modrinth.yml -f tag="v$VERSION"
+            echo "Dispatched modrinth.yml for v$VERSION."
+          fi
+          if [ -f .github/workflows/curseforge.yml ]; then
+            gh workflow run curseforge.yml -f tag="v$VERSION"
+            echo "Dispatched curseforge.yml for v$VERSION."
+          fi
