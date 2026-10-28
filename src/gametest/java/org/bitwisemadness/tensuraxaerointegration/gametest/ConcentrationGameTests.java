@@ -28,6 +28,15 @@ import org.bitwisemadness.tensuraxaerointegration.tiers.TierTable;
  *
  * <p>Keep {@code expectedTests} in {@code build.gradle} in sync with the number
  * of {@code @GameTest} methods here.</p>
+ *
+ * <p>{@code @PrefixGameTestTemplate(false)} makes the template resolve to this
+ * mod's 8x8x8 air structure at
+ * {@code data/tensura_xaero_integration/structure/empty.nbt}, not vanilla's
+ * zero-sized {@code minecraft:empty}. The size has to stay non-zero: a
+ * zero-sized structure makes the box vanilla force-loads at setup time disagree
+ * with the box the harness waits on before starting a test, so the run wedges
+ * whenever the random test origin lands on a chunk boundary. See
+ * docs/TESTING.md.</p>
  */
 @GameTestHolder(TensuraXaeroIntegration.MOD_ID)
 @PrefixGameTestTemplate(false)

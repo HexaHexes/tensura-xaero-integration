@@ -180,6 +180,7 @@ file into this repo verbatim as its own PR - never re-type or patch it by hand.
   `release.yml`, so anything that reaches "release published" is meant to be
   consumable. `workflow_dispatch` lets a maintainer republish a version after a
   packaging fix without cutting a new release.
+<<<<<<< HEAD
 - `modrinth.yml` publishes the same jar to Modrinth whenever a GitHub release is
   published (or on demand via `workflow_dispatch` with a tag), mirroring the
   CurseForge design that lives in `tiered-echoes`: alphas stay GitHub-only, betas
@@ -194,6 +195,8 @@ file into this repo verbatim as its own PR - never re-type or patch it by hand.
   When promoting the file into a repo, edit the two
   env lines at the top: the Minecraft version and the loader names (Modrinth's
   lowercase forms: `neoforge`, `forge`).
+=======
+>>>>>>> origin/main
 - CurseForge publishing (`curseforge.yml`) is **deferred** until the mod has a CurseForge
   listing and the `CURSEFORGE_PROJECT_ID` / `CURSEFORGE_API_KEY` secrets. Do not add it
   speculatively.

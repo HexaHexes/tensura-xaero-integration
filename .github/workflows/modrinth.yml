@@ -62,10 +62,11 @@ jobs:
 
           # Alphas are GitHub-only by decision, mirroring the CurseForge flow:
           # they are rolling builds of main, and publishing them would bury the
-          # channel users actually browse. No pre-release suffix at all means a
-          # clean bump, which is stable.
+          # channel users actually browse. Both the +g rolling-build tags and
+          # the -alpha.N train tags are alphas; a -beta.N suffix publishes as a
+          # beta; no pre-release suffix at all means a clean bump, stable.
           case "$RELEASE_TAG" in
-            *+g*)
+            *+g*|*-alpha*)
               echo "channel=alpha"
               echo "publish=false"
               echo "reason=alphas are published to GitHub only, not Modrinth"
