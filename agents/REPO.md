@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-# Repo rules — Tensura Xaero Integration
-=======
-# Repo rules ΓÇö Tensura Xaero Integration
->>>>>>> origin/main
+# Repo rules ╬ô├ç├╢ Tensura Xaero Integration
 
 Repo-specific rules and notes. The org-wide `AGENTS.md` beside this file is
 maintained in [`neoforge-mod-template`](https://github.com/HexaHexes/neoforge-mod-template)
@@ -10,48 +6,29 @@ and pulled in verbatim - **never hand-edit it.** Everything in this file is this
 repo's own and is edited freely; keep it aligned with the org rules rather than
 restating them.
 
-<<<<<<< HEAD
-**Repo:** `HexaHexes/tensura-xaero-integration` · **Mod ID:** `tensura_xaero_integration` · **Branch:** `main`
-**Platform:** Minecraft 1.21.1 / NeoForge 21.1.259 / JDK 21 · **Jar:** `build/libs/tensura_xaero_integration-<version>.jar`
-=======
-**Repo:** `HexaHexes/tensura-xaero-integration` ┬╖ **Mod ID:** `tensura_xaero_integration` ┬╖ **Branch:** `main`
-**Platform:** Minecraft 1.21.1 / NeoForge 21.1.259 / JDK 21 ┬╖ **Jar:** `build/libs/tensura_xaero_integration-<version>.jar`
->>>>>>> origin/main
+**Repo:** `HexaHexes/tensura-xaero-integration` Γö¼Γòû **Mod ID:** `tensura_xaero_integration` Γö¼Γòû **Branch:** `main`
+**Platform:** Minecraft 1.21.1 / NeoForge 21.1.259 / JDK 21 Γö¼Γòû **Jar:** `build/libs/tensura_xaero_integration-<version>.jar`
 
 Shows Tensura: Reincarnated's ambient chunk magicule as a translucent overlay on
 Xaero's Minimap and Xaero's World Map, and reports the hovered chunk's
 concentration on the world map. Server-authoritative, mapped chunks only, no
 simulation of its own. Read `docs/RECONNAISSANCE.md` before touching any
-<<<<<<< HEAD
-third-party API — it records what those jars actually expose and what they do not.
-=======
-third-party API ΓÇö it records what those jars actually expose and what they do not.
->>>>>>> origin/main
+third-party API ╬ô├ç├╢ it records what those jars actually expose and what they do not.
 
 **Dependencies**
 - Required: Minecraft, NeoForge.
 - Optional: `tensura` (2.0.1.3+, the only concentration source), `xaerominimap`
-<<<<<<< HEAD
-  (26.6.0+), `xaeroworldmap` (1.47.0+) — all `compileOnly` from CurseMaven, never
-=======
-  (26.6.0+), `xaeroworldmap` (1.47.0+) ΓÇö all `compileOnly` from CurseMaven, never
->>>>>>> origin/main
+  (26.6.0+), `xaeroworldmap` (1.47.0+) ╬ô├ç├╢ all `compileOnly` from CurseMaven, never
   bundled. Gating: `tensura/TensuraBridge` and `client/WorldMapBridge` /
   `client/MinimapBridge` check `ModList` first, and `TensuraAccess` /
   `Xaero*Access` are the only classes importing those APIs. Do not import a
   third-party type anywhere else.
 
-<<<<<<< HEAD
-**Test:** `./gradlew runGameTestServer` — `ConcentrationGameTests` (6 tests).
-`expectedTests = 6` in `build.gradle` must match the `@GameTest` count. JUnit:
-`./gradlew test` (130 tests, no Minecraft needed).
-=======
-**Test:** `./gradlew runGameTestServer` ΓÇö `ConcentrationGameTests` (6 tests).
+**Test:** `./gradlew runGameTestServer` ╬ô├ç├╢ `ConcentrationGameTests` (6 tests).
 `expectedTests = 6` in `build.gradle` must match the `@GameTest` count. JUnit:
 `./gradlew test` (177 tests, no Minecraft needed). JFR-armed profiling runs:
 `./gradlew runProfileClient` (both Xaero mods staged) and `./gradlew runProfileServer`
 (the server closure); see `docs/TESTING.md`.
->>>>>>> origin/main
 
 **Remote:** `github.com/HexaHexes/tensura-xaero-integration` (public, default
 branch `main`).
@@ -72,28 +49,19 @@ branch `main`).
 - **ManasCore's modules are FML nested jars.** `extractManascoreModules` explodes
   them onto the compile classpath; without it Tensura's public types do not
   compile. Keep that input coming from CurseMaven.
-<<<<<<< HEAD
-- **Never substitute `AreaMagiculeHelper.getMagicule` for a chunk query** — it
-  returns the baseline when the chunk is not loaded, which turns "no data" into a
-  fake value.
-- **Privacy rule:** a chunk that is not mapped must never be rendered, tooltipped,
-  cached or servery. `ClientConcentrationStore.offer` refuses unmapped writes and
-  `ConcentrationServer` only answers subscribed chunks — do not add a path around
-=======
-- **Never substitute `AreaMagiculeHelper.getMagicule` for a chunk query** ΓÇö it
+- **Never substitute `AreaMagiculeHelper.getMagicule` for a chunk query** ╬ô├ç├╢ it
   returns the baseline when the chunk is not loaded, which turns "no data" into a
   fake value.
 - **The gametest `empty` template must stay non-zero-sized.**
   `src/gametest/resources/data/tensura_xaero_integration/structure/empty.nbt` is an
   8x8x8 air structure that declares `size` as a list of ints. A zero-sized
-  template ΓÇö vanilla's `minecraft:empty`, or this file with a `size` written as an
-  int-array ΓÇö makes the box the harness force-loads differ from the box it waits
+  template ╬ô├ç├╢ vanilla's `minecraft:empty`, or this file with a `size` written as an
+  int-array ╬ô├ç├╢ makes the box the harness force-loads differ from the box it waits
   on, and the run hangs forever whenever the random test origin is chunk-aligned.
   `docs/TESTING.md` has the full account.
 - **Privacy rule:** a chunk that is not mapped must never be rendered, tooltipped,
   cached or servery. `ClientConcentrationStore.offer` refuses unmapped writes and
-  `ConcentrationServer` only answers subscribed chunks ΓÇö do not add a path around
->>>>>>> origin/main
+  `ConcentrationServer` only answers subscribed chunks ╬ô├ç├╢ do not add a path around
   either gate.
 - **Last-known values are still real observations.** Persistence only ever writes
   what the mapped-only ingress already accepted, and a replayed value is always
@@ -122,9 +90,9 @@ branch `main`).
 - The repo ships `release.yml`: a version in `gradle.properties` without a
   matching `vX.Y.Z` tag is built and published as a GitHub release
   (alpha/nightly opt-in via the `ALPHA_RELEASES` variable, off by default).
-<<<<<<< HEAD
-=======
 - `publish.yml` publishes the Maven artifact to the org's GitHub Packages
   registry when that release is published - see the org rulebook for the
   consumer-side auth details (`PACKAGE_READ_TOKEN`).
->>>>>>> origin/main
+- `publish.yml` publishes the Maven artifact to the org's GitHub Packages
+  registry when that release is published - see the org rulebook for the
+  consumer-side auth details (`PACKAGE_READ_TOKEN`).
