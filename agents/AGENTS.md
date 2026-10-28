@@ -66,8 +66,8 @@ file into this repo verbatim as its own PR - never re-type or patch it by hand.
   `libs/` and `testmods/` staging folders are retired: CI must resolve every
   dependency from a clean checkout. Pin the exact version the repo was verified
   against; bump pins deliberately, never implicitly.
-- **Org-owned libraries publish to GitHub Packages** (`https://maven.pkg.github.com/HexaHexes/<repo>`,
-  e.g. `infinite-dungeon-api`) and follow the same rule - never fall back to a
+- **Every repo publishes its artifact to GitHub Packages** (`https://maven.pkg.github.com/HexaHexes/<repo>`)
+  for alpha, beta and stable releases - never publish to or consume from a
   gitignored local jar. Watch three things here:
   - **Reads always require auth, and GitHub answers 404 (not 401) when it is missing**,
     so an unauthenticated consumer fails with a message that looks like a mistyped
@@ -165,6 +165,21 @@ file into this repo verbatim as its own PR - never re-type or patch it by hand.
   `require-review-from-write-access` (one approving review; the listed org owners
   bypass). Direct pushes to the default branch are rejected by GitHub.
 - `version-bump.yml` opens an isolated version-bump PR (only the version file changes).
+- `release.yml` publishes a GitHub release for `v<mod_version>` on a push to the default
+  branch when that release does not exist yet, attaching the jar the build produced. The
+  jar name is read from `mod_id`, so a rename needs no edit here. Pre-releases are
+  opt-in: an `-alpha`/`-beta` version publishes only when the repository variable
+  `ALPHA_RELEASES` is `true`, otherwise it is skipped with a log line rather than a
+  failure. Promoted from `tensura-iaf-growth`, the org's reference implementation, and
+  its release notes are player-facing - rewrite them when promoting the file into a mod.
+- `publish.yml` publishes the jar as a Maven artifact to the org's GitHub Packages
+  registry whenever a GitHub release is published, via the `maven-publish` block in
+  `build.gradle` (artifactId is `mod_id`; pom metadata comes from `gradle.properties`;
+  the block's URL names the repository it lives in - the rename checklist covers it).
+  Alpha, beta and stable releases all publish: pre-releases are gated upstream by
+  `release.yml`, so anything that reaches "release published" is meant to be
+  consumable. `workflow_dispatch` lets a maintainer republish a version after a
+  packaging fix without cutting a new release.
 - CurseForge publishing (`curseforge.yml`) is **deferred** until the mod has a CurseForge
   listing and the `CURSEFORGE_PROJECT_ID` / `CURSEFORGE_API_KEY` secrets. Do not add it
   speculatively.
