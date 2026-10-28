@@ -15,6 +15,9 @@ on:
 
 permissions:
   contents: write
+  # Dispatching the publishing workflows below needs actions: write - an
+  # explicit permissions block zeroes every scope it does not name.
+  actions: write
 
 # Serialize releases. Two rapid pushes must queue rather than race for the same
 # tag, and a cancelled release is worse than a late one.
@@ -279,3 +282,34 @@ jobs:
           fi
 
           echo "Published $TAG as a $CHANNEL release."
+
+      # GitHub refuses to cascade workflow runs started by the default
+      # GITHUB_TOKEN, so the "release: published" trigger only ever fires for
+      # releases created by hand. Dispatch the publishing workflows directly
+      # instead - they are deliberately separate from this one, so a Modrinth
+      # or Packages outage never fails the release itself. The release check
+      # makes this a no-op when an alpha was skipped and never tagged.
+      - name: Dispatch the publishing workflows
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          VERSION=$(grep '^mod_version=' gradle.properties | cut -d= -f2 | tr -d '[:space:]')
+          if ! gh release view "v$VERSION" >/dev/null 2>&1; then
+            echo "No release v$VERSION exists (skipped or not published); nothing to dispatch."
+            exit 0
+          fi
+
+          if [ -f .github/workflows/publish.yml ]; then
+            gh workflow run publish.yml
+            echo "Dispatched publish.yml."
+          fi
+          if [ -f .github/workflows/modrinth.yml ]; then
+            gh workflow run modrinth.yml -f tag="v$VERSION"
+            echo "Dispatched modrinth.yml for v$VERSION."
+          fi
+          if [ -f .github/workflows/curseforge.yml ]; then
+            gh workflow run curseforge.yml -f tag="v$VERSION"
+            echo "Dispatched curseforge.yml for v$VERSION."
+          fi

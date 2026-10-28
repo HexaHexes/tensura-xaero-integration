@@ -1,75 +1,47 @@
-# Agent rules and conventions — Tensura Xaero Integration
+# Agent rules and conventions
 
-**Repo:** `HexaHexes/tensura-xaero-integration` · **Mod ID:** `tensura_xaero_integration` · **Branch:** `main`
-**Platform:** Minecraft 1.21.1 / NeoForge 21.1.259 / JDK 21 · **Jar:** `build/libs/tensura_xaero_integration-<version>.jar`
+Org-wide rules for every HexaHexes mod repo. This file is maintained in the
+[`neoforge-mod-template`](https://github.com/HexaHexes/neoforge-mod-template)
+repo and pulled into each repo **verbatim** - never hand-edit it here. Rule
+changes are made in the template first (own branch + squash PR), then the file
+is pulled into this repo as its own PR.
 
-Shows Tensura: Reincarnated's ambient chunk magicule as a translucent overlay on
-Xaero's Minimap and Xaero's World Map, and reports the hovered chunk's
-concentration on the world map. Server-authoritative, mapped chunks only, no
-simulation of its own. Read `docs/RECONNAISSANCE.md` before touching any
-third-party API — it records what those jars actually expose and what they do not.
-
-**Dependencies**
-- Required: Minecraft, NeoForge.
-- Optional: `tensura` (2.0.1.3+, the only concentration source), `xaerominimap`
-  (26.6.0+), `xaeroworldmap` (1.47.0+) — all `compileOnly` from CurseMaven, never
-  bundled. Gating: `tensura/TensuraBridge` and `client/WorldMapBridge` /
-  `client/MinimapBridge` check `ModList` first, and `TensuraAccess` /
-  `Xaero*Access` are the only classes importing those APIs. Do not import a
-  third-party type anywhere else.
-
-**Test:** `./gradlew runGameTestServer` — `ConcentrationGameTests` (6 tests).
-`expectedTests = 6` in `build.gradle` must match the `@GameTest` count. JUnit:
-`./gradlew test` (130 tests, no Minecraft needed).
-
-**Gotchas**
-- **Two mixins are load-bearing.** `mixin/worldmap/WorldMapHighlighterRegistryMixin`
-  and `mixin/minimap/MinimapHighlighterRegistryMixin` inject at `HEAD` of each
-  map's `HighlighterRegistry.end()` because neither Xaero mod exposes a
-  third-party registration call. Verified only against the pinned Xaero versions;
-  re-verify on any bump, and keep each mixin config's `requiredMods` pointing at
-  exactly one map mod so it never applies when that map is absent.
-- **`compileOnly` versions and the `*_mod_version` ranges in
-  `src/main/templates/META-INF/neoforge.mods.toml` are one decision.** Bump the
-  file id and the version together in `gradle.properties`.
-- **ManasCore's modules are FML nested jars.** `extractManascoreModules` explodes
-  them onto the compile classpath; without it Tensura's public types do not
-  compile. Keep that input coming from CurseMaven.
-- **Never substitute `AreaMagiculeHelper.getMagicule` for a chunk query** — it
-  returns the baseline when the chunk is not loaded, which turns "no data" into a
-  fake value.
-- **Privacy rule:** a chunk that is not mapped must never be rendered, tooltipped,
-  cached or servery. `ClientConcentrationStore.offer` refuses unmapped writes and
-  `ConcentrationServer` only answers subscribed chunks — do not add a path around
-  either gate.
-- **Last-known values are still real observations.** Persistence only ever writes
-  what the mapped-only ingress already accepted, and a replayed value is always
-  `historical`, so it is drawn dimmer and hover says "(last known)". Never store a
-  value for an unmapped or never-visited chunk, and never let a replayed value
-  compare equal to a live one (the cache treats `historical` as part of the
-  observation for exactly that reason).
+Repo-specific rules - identity, description, dependencies, test commands,
+gotchas and sanctioned exceptions - live in [`agents/REPO.md`](REPO.md), the
+only agent-rules file edited inside a repo.
 
 ---
 
-## Branch sync (do this first)
+## Before you start (do this first)
 
 Before starting any new development in this repo:
 
-1. `git status` — confirm what uncommitted work exists. Never disturb or sweep it.
-2. `git pull --ff-only` — sync with the remote. A fast-forward is the normal case,
-   because we push straight to the shared branch.
-3. If the pull would **not** fast-forward (the branch has diverged), or if it would
+1. **Open issues for the work.** Every piece of work begins as an issue - or
+   several, for complex tasks - detailing what needs to be done; the PR
+   references them. No tracking issue, no work.
+2. **Check rule freshness.** Compare this repo's `agents/AGENTS.md` against the
+   template's and reconcile any drift before touching code - rules changed in
+   the template must have been pulled here first.
+3. `git status` — confirm what uncommitted work exists. Never disturb or sweep it.
+4. `git pull --ff-only` — sync with the remote. A fast-forward is the normal case,
+   because history on the default branch is never rewritten.
+5. If the pull would **not** fast-forward (the branch has diverged), or if it would
    collide with local uncommitted work, **stop and ask** rather than merging, rebasing
    or stashing on your own.
+
+**Remote:** `github.com/HexaHexes/<name>` (default branch `main`). Direct pushes to
+the default branch are blocked by branch rulesets - land changes through a PR. Push
+anything only after checks are green and the user has given the go.
+
+**Pulling rule updates:** when the template's `agents/AGENTS.md` changes, pull the
+file into this repo verbatim as its own PR - never re-type or patch it by hand.
 
 ## Scope doctrine
 
 - **One mod + bundled datapack.** No KubeJS scripts.
 - **Data-driven over code** — prefer JSON/datapack content to Java when both work.
 - **Public API only, no mixins** in the colony-gear-style addon mods. Sanctioned
-  exceptions: `ds-tensura-fix` (tensura-dragon-skin-rebalance), a mixin fix mod by
-  design, and this repo, whose two client mixins are the only way to register a
-  map overlay (see the gotchas above). No other mixin is to be added here.
+  exception: `ds-tensura-fix` (tensura-dragon-skin-rebalance), a mixin fix mod by design.
 
 ## Verification
 
@@ -94,8 +66,8 @@ Before starting any new development in this repo:
   `libs/` and `testmods/` staging folders are retired: CI must resolve every
   dependency from a clean checkout. Pin the exact version the repo was verified
   against; bump pins deliberately, never implicitly.
-- **Org-owned libraries publish to GitHub Packages** (`https://maven.pkg.github.com/HexaHexes/<repo>`,
-  e.g. `infinite-dungeon-api`) and follow the same rule - never fall back to a
+- **Every repo publishes its artifact to GitHub Packages** (`https://maven.pkg.github.com/HexaHexes/<repo>`)
+  for alpha, beta and stable releases - never publish to or consume from a
   gitignored local jar. Watch three things here:
   - **Reads always require auth, and GitHub answers 404 (not 401) when it is missing**,
     so an unauthenticated consumer fails with a message that looks like a mistyped
@@ -122,25 +94,45 @@ Before starting any new development in this repo:
   UTF-8 BOM that breaks Gradle's parser and YAML. Use
   `[System.IO.File]::WriteAllText($path, $text)` (no BOM). Re-check for BOMs after
   any script-written edit.
+- **A fresh `git init` on Windows records new files as `100644`** — the executable bit
+  is invisible to git there, so a committed `gradlew` reaches CI as non-executable and
+  every job dies with `./gradlew: Permission denied` before Gradle starts. Before a
+  repo's first commit, run `git update-index --chmod=+x gradlew` and confirm with
+  `git ls-files -s gradlew` (expect `100755`).
+- There are no repo-owned `.ps1` scripts any more. One-off inspection commands are
+  fine; anything that *generates shipped content* belongs in the build, not in a
+  script.
 
 ## Git & release
 
 - Remote is SSH: `git@github.com:HexaHexes/<name>.git`.
-- Push only after tests are green **and** the user has given the go.
+- Push only after checks are green **and** the user has given the go.
 - Never sweep the user's uncommitted work into a commit — commit only what is intended.
 - Commit subjects: concise, imperative.
-- **Version bump on finish:** always bump the version when a new feature or bugfix
-  is finished.
+- **Version bump on finish:** always bump `mod_version` in `gradle.properties`
+  when a new feature or bugfix is finished.
 - **One feature or bugfix per branch:** develop each on its own feature branch and
-  merge it into main/master through a pull request with a **squash merge**. The PR
-  body must detail the work done, following `.github/pull_request_template.md`.
+  merge it into the default branch through a pull request with a **squash merge**.
+  The PR body must detail the work done, following `.github/pull_request_template.md`.
 
 ## House style
 
-- **No icons** unless the user explicitly asks.
+- **No icons** unless the user explicitly asks. Icons are being removed across all repos.
+- **No emojis, ever.** Prohibited in all code, docs, configs, and commit messages.
 - READMEs are **player-facing only**: pitch, mechanics in plain terms, in-game usage,
   required/optional dependencies, credits, license. No build internals, no class names.
-- This repo is **LGPL v2.1**, copyright Bitwise Madness. `NOTICE` / attribution files
+- **AI disclosure in every README.** Every `README.md` ends with the org's
+  AI-assistance disclosure as its final section, in the canonical wording -
+  identical in every repo, no variants:
+
+  ```markdown
+  ## AI disclosure
+
+  Parts of this project were written with the assistance of AI coding tools.
+  AI-assisted code, data and documentation ship only after human review by the
+  maintainers.
+  ```
+- All repos are **LGPL v2.1**, copyright Bitwise Madness. `NOTICE` / attribution files
   are mandatory and must never be deleted.
 - Deploy to the Tensura RPG instance **only** when the user asks.
 
@@ -155,9 +147,9 @@ Before starting any new development in this repo:
   The Maven `group` in `build.gradle` matches (`org.bitwisemadness`).
 - Keep repo name, folder name, `mod_id`, and the Java package aligned; the rename
   checklist in `README.md` walks the whole set.
-- **This template is canonical for org-wide rules.** When a rule is added or changed
-  in any repo's `agents/AGENTS.md`, mirror the same change into the template so new
-  repos inherit it.
+- **This template is canonical for org-wide rules.** Rules change here first;
+  consuming repos never hand-edit their `agents/AGENTS.md` - they pull the file
+  verbatim (see Before you start).
 
 ## CI & release model
 
@@ -173,13 +165,35 @@ Before starting any new development in this repo:
   `require-review-from-write-access` (one approving review; the listed org owners
   bypass). Direct pushes to the default branch are rejected by GitHub.
 - `version-bump.yml` opens an isolated version-bump PR (only the version file changes).
-- `release.yml` runs on every push to `main`: it builds, re-asserts the JUnit and
-  GameTest results, then tags and publishes. Anything without a version bump, or
-  with an `-alpha` suffix, is an **alpha** and only publishes when the
-  `ALPHA_RELEASES` repository variable is `true`; alpha tags carry the commit
-  (`vX.Y.Z+g<sha>`) and the jar asset is stamped with it. Betas and stables are
-  gated on an isolated version bump. No CurseForge dispatch here: this repo has
-  no CurseForge listing.
+- `release.yml` publishes a GitHub release for `v<mod_version>` on a push to the default
+  branch when that release does not exist yet, attaching the jar the build produced. The
+  jar name is read from `mod_id`, so a rename needs no edit here. Pre-releases are
+  opt-in: an `-alpha`/`-beta` version publishes only when the repository variable
+  `ALPHA_RELEASES` is `true`, otherwise it is skipped with a log line rather than a
+  failure. Promoted from `tensura-iaf-growth`, the org's reference implementation, and
+  its release notes are player-facing - rewrite them when promoting the file into a mod.
+- `publish.yml` publishes the jar as a Maven artifact to the org's GitHub Packages
+  registry whenever a GitHub release is published, via the `maven-publish` block in
+  `build.gradle` (artifactId is `mod_id`; pom metadata comes from `gradle.properties`;
+  the block's URL names the repository it lives in - the rename checklist covers it).
+  Alpha, beta and stable releases all publish: pre-releases are gated upstream by
+  `release.yml`, so anything that reaches "release published" is meant to be
+  consumable. `workflow_dispatch` lets a maintainer republish a version after a
+  packaging fix without cutting a new release.
+- `modrinth.yml` publishes the same jar to Modrinth whenever a GitHub release is
+  published (or on demand via `workflow_dispatch` with a tag), mirroring the
+  CurseForge design that lives in `tiered-echoes`: alphas stay GitHub-only, betas
+  and stables publish, and the asset and changelog are read back from the release
+  rather than the event payload. It skips with a notice until the repo has a
+  Modrinth listing (`MODRINTH_PROJECT_ID` + `MODRINTH_TOKEN` secrets), and fails
+  loudly when only one of the two is set - half-configured is a mistake,
+  unconfigured is a deferral. Because GitHub refuses to cascade workflow runs
+  started by the default `GITHUB_TOKEN`, `release.yml` dispatches `publish.yml`,
+  `modrinth.yml` and `curseforge.yml` (whichever a repo ships) directly after
+  tagging - the `release: published` trigger only covers releases made by hand.
+  When promoting the file into a repo, edit the two
+  env lines at the top: the Minecraft version and the loader names (Modrinth's
+  lowercase forms: `neoforge`, `forge`).
 - CurseForge publishing (`curseforge.yml`) is **deferred** until the mod has a CurseForge
   listing and the `CURSEFORGE_PROJECT_ID` / `CURSEFORGE_API_KEY` secrets. Do not add it
   speculatively.
