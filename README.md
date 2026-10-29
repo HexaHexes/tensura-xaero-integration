@@ -124,3 +124,18 @@ No third-party mod binary is bundled, redistributed or committed by this project
 Parts of this project were written with the assistance of AI coding tools.
 AI-assisted code, data and documentation ship only after human review by the
 maintainers.
+
+## In-game config editing
+
+Mods built with this template can be edited in-game with
+[Configured](https://www.curseforge.com/minecraft/mc-mods/configured) - install
+it like any other mod; it adds no code to this one. Open the mod list, select a
+mod, press Config, and change values directly: Configured writes through
+NeoForge's config system, so a reload applies the new values without restarting
+the game.
+
+This template pre-wires the config-screen background in
+`src/main/templates/META-INF/neoforge.mods.toml`
+(`[modproperties.${mod_id}] configuredBackground`) - point it at any texture you
+like. Note Configured only shows a menu for mods that actually register a
+config: a template-derived mod with no registered settings has nothing to show.
