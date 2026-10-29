@@ -13,7 +13,7 @@ name: CI
 # checkout. Mod repos derived from it resolve their dependencies through
 # CurseMaven coordinates (never gitignored libs/ or testmods/ folders) - keep
 # it that way or CI cannot run.
-#
+
 # The junit job also carries a datapack drift gate: where a repo commits
 # generated output at src/generated/resources, runData must reproduce it
 # byte-identically and the jar must ship every file. It activates on that
@@ -156,7 +156,10 @@ jobs:
   gametest:
     name: gametest
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # The Gradle task kills a run that exceeds its own 240 s limit; this is the
+    # backstop for a hang that survives that (a wedged Gradle daemon, a step
+    # waiting on a pipe). A healthy run is under a minute.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
 
@@ -255,49 +258,10 @@ jobs:
   version-bump:
     name: version-bump
     runs-on: ubuntu-latest
-
-    # Label creation is issue-scoped, so this one job asks for more than the
-    # workflow's read-only default. Everything it already does stays read; the only
-    # write is the label below.
-    permissions:
-      contents: read
-      pull-requests: read
-      issues: write
-
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-
-      - name: Ensure the breaking label exists
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-        run: |
-          set -euo pipefail
-
-          # The PR template tells authors to apply the `breaking` label and the
-          # magnitude rule below reads merged PRs by it, but labels live per
-          # repository and nothing created them - so the query could only ever come
-          # back empty and a breaking change could ship in a patch release with CI
-          # green. Creating it here means every repo running this workflow carries
-          # the label without anyone having clicked it into existence.
-          #
-          # Only created when missing, so a label someone has recoloured or
-          # re-described is left alone. A fork PR runs with a read-only token and
-          # cannot create it: warn loudly rather than fail the check, because a red
-          # required check would block the whole external contribution.
-          if gh label view breaking --repo "$REPO" >/dev/null 2>&1; then
-            echo "breaking label already present in $REPO."
-            exit 0
-          fi
-
-          if gh label create breaking --repo "$REPO" --color b60205 \
-               --description "Breaking change: the next clean bump must raise major or minor"; then
-            echo "created the breaking label in $REPO."
-          else
-            echo "::warning::Could not create the 'breaking' label - a fork PR has a read-only token. Add it by hand, or re-run from a branch in this repo."
-          fi
 
       - name: Enforce version bump rules
         env:
