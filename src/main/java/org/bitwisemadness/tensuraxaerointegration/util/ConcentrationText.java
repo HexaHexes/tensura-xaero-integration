@@ -24,8 +24,9 @@ public final class ConcentrationText {
         if (!Double.isFinite(value)) {
             throw new IllegalArgumentException("cannot format a non-finite concentration");
         }
-        double rounded = Math.round(value * 10.0) / 10.0;
-        if (rounded == Math.rint(rounded)) {
+        long tenths = Math.round(value * 10.0);
+        double rounded = tenths / 10.0;
+        if (tenths % 10 == 0) {
             return String.format(Locale.ROOT, "%,.0f", rounded);
         }
         return String.format(Locale.ROOT, "%,.1f", rounded);

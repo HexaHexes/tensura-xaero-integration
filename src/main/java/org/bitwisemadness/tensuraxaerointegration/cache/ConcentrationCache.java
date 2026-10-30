@@ -93,7 +93,7 @@ public final class ConcentrationCache {
         this.entries = new LinkedHashMap<>(Math.min(maxEntries, 256), 0.75f, false) {
             @Override
             protected boolean removeEldestEntry(Map.Entry<ChunkCacheKey, ConcentrationEntry> eldest) {
-                if (size() <= cap) {
+                if (super.size() <= cap) {
                     return false;
                 }
                 // An evicted value must leave the live set too, or the set would

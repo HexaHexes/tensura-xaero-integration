@@ -8,7 +8,9 @@ import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ServerData;
 import net.minecraft.core.registries.Registries;
@@ -75,19 +77,19 @@ public final class ClientConcentration {
     /** A sweep that demotes this many at once is an event, not a missed beat. */
     private static final int MASS_EXPIRY_CHUNKS = 8;
 
-    private int lastResyncTick;
+    private volatile int lastResyncTick;
     private int lastSaveTick;
 
     // One-shot diagnostics: "why did that value dim?" is otherwise guesswork.
-    private boolean expiryReported;
-    private boolean massExpiryReported;
-    private boolean unavailableReported;
-    private boolean removalReported;
+    private volatile boolean expiryReported;
+    private volatile boolean massExpiryReported;
+    private volatile boolean unavailableReported;
+    private volatile boolean removalReported;
 
     // Pause accounting: the wall clock runs while the pause menu is open, but the
     // integrated server does not, so that time must not age a value.
-    private long lastTickMillis;
-    private boolean pausedAtLastTick;
+    private volatile long lastTickMillis;
+    private volatile boolean pausedAtLastTick;
 
     /** Created on first use, so no config value is read during class initialisation. */
     private ClientConcentrationStore store;
@@ -99,9 +101,9 @@ public final class ClientConcentration {
 
     private String worldToken = "";
     private String dimensionId = "";
-    private int ticks;
-    private int lastSubscribeTick;
-    private boolean subscribeRefreshDue = true;
+    private final AtomicInteger ticks = new AtomicInteger();
+    private volatile int lastSubscribeTick;
+    private volatile boolean subscribeRefreshDue = true;
 
     private ClientConcentration() {
     }
@@ -203,21 +205,21 @@ public final class ClientConcentration {
         if (!token.equals(this.worldToken) || !dimension.equals(this.dimensionId)) {
             beginSession(token, dimension);
         }
-        this.ticks++;
+        this.ticks.incrementAndGet();
         accountForPause(minecraft);
 
-        if (this.ticks % MAINTENANCE_INTERVAL_TICKS == 0) {
+        if (this.ticks.get() % MAINTENANCE_INTERVAL_TICKS == 0) {
             // The window follows the server's own confirmation cadence, so it can
             // never be shorter than the server's heartbeat or longer than the
             // server's promise to keep a chunk current.
             store().expire(store().staleAfterMillis()).ifPresent(this::reportExpiry);
         }
-        if (this.ticks - this.lastSaveTick >= SAVE_INTERVAL_TICKS) {
-            this.lastSaveTick = this.ticks;
+        if (this.ticks.get() - this.lastSaveTick >= SAVE_INTERVAL_TICKS) {
+            this.lastSaveTick = this.ticks.get();
             saveToDisk(this.worldToken, false);
         }
-        if (this.subscribeRefreshDue || this.ticks - this.lastSubscribeTick >= ClientConfig.subscribeIntervalTicks()) {
-            this.lastSubscribeTick = this.ticks;
+        if (this.subscribeRefreshDue || this.ticks.get() - this.lastSubscribeTick >= ClientConfig.subscribeIntervalTicks()) {
+            this.lastSubscribeTick = this.ticks.get();
             this.subscribeRefreshDue = false;
             updateSubscriptions(minecraft);
         }
@@ -389,7 +391,7 @@ public final class ClientConcentration {
         this.lastSubscribeTick = 0;
         this.lastResyncTick = 0;
         this.subscribeRefreshDue = true;
-        this.ticks = 0;
+        this.ticks.set(0);
         this.expiryReported = false;
         this.massExpiryReported = false;
         this.unavailableReported = false;
@@ -425,7 +427,7 @@ public final class ClientConcentration {
             }
             ChunkCacheKey key = new ChunkCacheKey(token, this.dimensionId, chunkX, chunkZ);
             wanted.add(key);
-            this.mappedTicks.put(key, this.ticks);
+            this.mappedTicks.put(key, this.ticks.get());
         }
         // Keep what the maps reported a moment ago: Xaero's mapped query reads the
         // regions it currently holds, and an eviction there is not an un-mapping.
@@ -433,7 +435,7 @@ public final class ClientConcentration {
         while (remembered.hasNext()) {
             Map.Entry<ChunkCacheKey, Integer> entry = remembered.next();
             ChunkCacheKey key = entry.getKey();
-            boolean expired = this.ticks - entry.getValue() > MAPPED_MEMORY_TICKS;
+            boolean expired = this.ticks.get() - entry.getValue() > MAPPED_MEMORY_TICKS;
             boolean elsewhere = !key.dimension().equals(this.dimensionId) || !key.world().equals(token);
             boolean tooFar = !ChunkRadius.within(key.chunkX(), key.chunkZ(), centerX, centerZ, radius);
             if (expired || elsewhere || tooFar) {
@@ -456,9 +458,9 @@ public final class ClientConcentration {
             }
         }
 
-        boolean resync = this.ticks - this.lastResyncTick >= RESYNC_INTERVAL_TICKS;
+        boolean resync = this.ticks.get() - this.lastResyncTick >= RESYNC_INTERVAL_TICKS;
         if (resync) {
-            this.lastResyncTick = this.ticks;
+            this.lastResyncTick = this.ticks.get();
         }
         if (resync && !wanted.isEmpty()) {
             sendSubscriptions(true, this.dimensionId, new ArrayList<>(wanted));
@@ -611,9 +613,10 @@ public final class ClientConcentration {
     }
 
     private static String worldToken(Minecraft minecraft) {
-        if (minecraft.getSingleplayerServer() != null) {
-            String levelName = minecraft.getSingleplayerServer().getWorldData().getLevelName();
-            return "sp:" + (levelName == null ? "" : levelName);
+        final var singleplayer = minecraft.getSingleplayerServer();
+        if (singleplayer != null) {
+            String levelName = singleplayer.getWorldData().getLevelName();
+            return "sp:" + Objects.requireNonNullElse(levelName, "");
         }
         ServerData server = minecraft.getCurrentServer();
         if (server != null) {

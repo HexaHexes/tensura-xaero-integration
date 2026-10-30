@@ -21,19 +21,19 @@ import net.minecraft.world.level.chunk.LevelChunk;
 import net.neoforged.neoforge.network.PacketDistributor;
 import org.bitwisemadness.tensuraxaerointegration.TensuraXaeroIntegration;
 import org.bitwisemadness.tensuraxaerointegration.cache.ChunkCacheKey;
+import org.bitwisemadness.tensuraxaerointegration.concentration.ConcentrationClassification;
 import org.bitwisemadness.tensuraxaerointegration.config.ServerConfig;
 import org.bitwisemadness.tensuraxaerointegration.net.ConcentrationPayload;
 import org.bitwisemadness.tensuraxaerointegration.net.PackedChunkPos;
 import org.bitwisemadness.tensuraxaerointegration.net.ServerInfoPayload;
 import org.bitwisemadness.tensuraxaerointegration.net.SubscriptionPayload;
-import org.bitwisemadness.tensuraxaerointegration.concentration.ConcentrationClassification;
 import org.bitwisemadness.tensuraxaerointegration.refresh.CadenceEstimate;
 import org.bitwisemadness.tensuraxaerointegration.refresh.ReconcileCursor;
 import org.bitwisemadness.tensuraxaerointegration.refresh.UpdateQueue;
 import org.bitwisemadness.tensuraxaerointegration.tensura.TensuraBridge;
 import org.bitwisemadness.tensuraxaerointegration.tiers.DimensionTier;
-import org.bitwisemadness.tensuraxaerointegration.util.ChunkRadius;
 import org.bitwisemadness.tensuraxaerointegration.tiers.MagiculeTiers;
+import org.bitwisemadness.tensuraxaerointegration.util.ChunkRadius;
 
 /**
  * Server-side owner of the concentration pipeline.

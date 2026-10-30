@@ -1,6 +1,7 @@
 package org.bitwisemadness.tensuraxaerointegration.client.overlay;
 
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.level.Level;
@@ -40,8 +41,8 @@ public final class WorldMapConcentrationOverlay extends ChunkHighlighter {
     public static final WorldMapConcentrationOverlay INSTANCE = new WorldMapConcentrationOverlay();
 
     /** One-shot diagnostics, so "nothing is drawn" can be located from the log. */
-    private static volatile boolean loggedHighlit;
-    private static volatile boolean loggedPainted;
+    private static final AtomicBoolean loggedHighlit = new AtomicBoolean();
+    private static final AtomicBoolean loggedPainted = new AtomicBoolean();
 
     /**
      * The five colours one chunk needs, reused per thread.
@@ -96,8 +97,7 @@ public final class WorldMapConcentrationOverlay extends ChunkHighlighter {
         }
         ConcentrationClassification band = ClientConcentrationStore.bandOf(state);
         boolean live = ClientConcentrationStore.liveOf(state);
-        if (!loggedHighlit) {
-            loggedHighlit = true;
+        if (loggedHighlit.compareAndSet(false, true)) {
             TensuraXaeroIntegration.LOGGER.info(
                     "World map is drawing concentration data (first chunk {},{}: live={} band={})",
                     chunkX, chunkZ, live, band);
@@ -106,8 +106,7 @@ public final class WorldMapConcentrationOverlay extends ChunkHighlighter {
         // a current one; a normal chunk stays fully transparent either way.
         double scale = live ? 1.0 : ClientConfig.historicalOpacityScale();
         int colour = ClientConfig.palette(store.serverPalette()).xaeroColorFor(band, scale);
-        if (!loggedPainted && (colour & 0xFF) > 0) {
-            loggedPainted = true;
+        if ((colour & 0xFF) > 0 && loggedPainted.compareAndSet(false, true)) {
             TensuraXaeroIntegration.LOGGER.info(
                     "World map overlay is painting (first painted chunk {},{}: band={} alpha={})",
                     chunkX, chunkZ, band, colour & 0xFF);
