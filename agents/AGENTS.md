@@ -120,7 +120,13 @@ file into this repo verbatim as its own PR - never re-type or patch it by hand.
 - Remote is SSH: `git@github.com:HexaHexes/<name>.git`.
 - Push only after checks are green **and** the user has given the go.
 - Never sweep the user's uncommitted work into a commit — commit only what is intended.
-- Commit subjects: concise, imperative.
+- **Commit subjects are changelog lines.** Releases carry an auto-generated
+  changelog (GitHub's generator, one PR per line) - write each PR title as a
+  player-facing sentence: imperative, present tense, what changed and for
+  whom. No closing keywords, issue numbers, or internal vocabulary in
+  titles; those live in the PR body. Internal and template-parity work
+  carries the `template-parity` label so it is excluded from changelogs
+  (see `.github/release.yml`); concise and imperative still apply.
 - **Version bump on finish:** every feature change or bugfix that lands in a
   mod bumps `mod_version` in `gradle.properties` - the `-alpha.N` channel,
   incremented, riding the work PR (alphas are the one channel allowed to
@@ -267,11 +273,20 @@ The org's approved rewrite of record is `tensura-jade` PR #27
   repos at flip time. The tools are pinned in `build.gradle`
   (`com.github.spotbugs` 6.5.x, `com.diffplug.spotless` 8.x).
   SpotBugs exclusions live in `config/spotbugs-exclude.xml` (wired via
-  `excludeFilter`): the `EI_EXPOSE_REP`/`EI_EXPOSE_REP2` pair only -
-  reference exposure is idiomatic NeoForge (fields hold `Level`/`ItemStack`/
-  capability objects by design), everything else stays enforced. Adding a
-  pattern to that file needs an issue-first decision (#52) - never grow it
-  silently. Checkstyle's ruleset is `config/checkstyle/checkstyle.xml`, shared
+    `excludeFilter`); four documented rules, each an issue-first decision:
+    `EI_EXPOSE_REP`/`EI_EXPOSE_REP2` org-wide (#52 - reference exposure is
+    idiomatic NeoForge: fields hold `Level`/`ItemStack`/capability objects by
+    design); `BC_IMPOSSIBLE_CAST` inside mixin packages (the
+    `(Target) (Object) this` merge idiom is invisible to static analysis);
+    `MS_EXPOSE_REP` on `getInstance` accessors (exposing the one service
+    instance is the singleton's purpose); and
+    `RV_RETURN_VALUE_IGNORED_NO_SIDE_EFFECT` inside wire-codec packages
+    (`FriendlyByteBuf` writes advance the write index through `ByteBufUtil`
+    statics the receiver-based side-effect analysis cannot attribute -
+    chaining the fluent calls does not clear it). Everything else -
+    `PA_PUBLIC_PRIMITIVE_ATTRIBUTE`, `MS_PKGPROTECT`, and every
+    correctness/security detector - stays enforced. Adding a rule to that
+    file needs an issue-first decision - never grow it silently. Checkstyle's ruleset is `config/checkstyle/checkstyle.xml`, shared
   verbatim like the SpotBugs filter. It rides Gradle's `check` graph, so a
   violation fails the `static` check **and** junit's `./gradlew build` - the
   rules are structural (a formatting nit never fails it), which keeps the
