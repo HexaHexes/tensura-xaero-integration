@@ -331,7 +331,7 @@ world-map-only install loads only what exists.
 | `cache/ConcentrationEntry` | value, mapped flag, timestamps, staleness |
 | `cache/ConcentrationCache` | bounded map, recency by write (reads are read-only), live-key expiry sweep |
 | `cache/RegionKey` | 32×32-chunk region identity used for repaint invalidation |
-| `concentration/ConcentrationThresholds` | baseline-relative band boundaries, validated to increase (the server's ladder, from the datapack) |
+| `concentration/ConcentrationThresholds` | baseline band boundaries as percentages, validated to increase (the server's ladder, from the datapack) |
 | `tiers/DimensionTier` | one dimension's normal concentration and band ladder |
 | `tiers/TierTable` | the loaded table plus palette, with the fallback for unlisted dimensions |
 | `tiers/TierParser` | the datapack schema: validation, merging, problem reporting |

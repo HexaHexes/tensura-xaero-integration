@@ -56,7 +56,7 @@ final class TensuraAccess {
 
     /**
      * Tensura's configured normal baseline ({@code baseMagicule}), which the
-     * classification multipliers are relative to.
+     * band percentages are relative to.
      *
      * <p>Read from {@code ChunkStorage.CONFIG}, the same object Tensura's own
      * storage uses. Empty when the config has not been registered (very early

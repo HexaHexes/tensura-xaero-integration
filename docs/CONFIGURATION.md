@@ -159,10 +159,10 @@ pack can add a dimension without restating the others.
   "dimensions": ["minecraft:the_nether"],
   "baseline": 600.0,
   "bands": {
-    "slightly_elevated": 1.25,
-    "moderately_elevated": 2.0,
-    "highly_elevated": 4.0,
-    "exceptionally_elevated": 8.0
+    "slightly_elevated": 25.0,
+    "moderately_elevated": 100.0,
+    "highly_elevated": 300.0,
+    "exceptionally_elevated": 700.0
   }
 }
 ```
@@ -171,7 +171,11 @@ pack can add a dimension without restating the others.
 | --- | --- | --- |
 | `dimensions` | yes | One or more dimension ids this entry describes. |
 | `baseline` | yes | The concentration that counts as *normal* there; finite and `> 0`. |
-| `bands` | no | Multipliers of the baseline. All four keys or none — a partial ladder is rejected. Defaults to `1.25 / 2 / 4 / 8`. |
+| `bands` | no | Percentage increases over the baseline, so `25` sits 25% above it (1.25×). All four keys or none — a partial ladder is rejected. Defaults to `25 / 100 / 300 / 700`. |
+
+Entries written before `0.1.0-alpha.15` gave multipliers instead; convert one with
+`percent = (multiplier - 1) × 100`, e.g. `1.25` becomes `25`. A value left as a
+multiplier now means a far smaller increase.
 
 Boundaries are inclusive on the lower band, and anything at or below the baseline
 is *Normal* and unpainted. A dimension no file mentions falls back to Tensura's
@@ -205,7 +209,7 @@ is skipped; the rest still applies.
 | `minecraft:overworld` | `500` | Tensura's `baseMagicule`; `dark_forest` reaches `2000`, `deep_dark` `2500`. |
 | `minecraft:the_nether` | `600` | `baseMagicule × 1.2`; biomes add `1500`–`4500`. |
 | `minecraft:the_end` | `750` | `baseMagicule × 1.5`; end biomes add `4500`. |
-| `tensura:hell` | `100500` | `+100000` level modifier; underworld biomes add `500`–`3500`, so its ladder is tight (`1.005`–`1.03`). |
+| `tensura:hell` | `100500` | `+100000` level modifier; underworld biomes add `500`–`3500`, so its ladder is tight (`0.5`–`3`). |
 | `tensura:labyrinth` | `30000` | `+29500` level modifier, flat void world: uniform, so the default ladder is right. Magic engines subtract from it, which is below normal and therefore unpainted. |
 | `tensura:boss_area` | `500` | Flat void arena, no modifiers. |
 | `iceandfire:dread_land` | `50500` | `+50000` from `tensura_iaf`; both dread biomes contribute nothing, so uniform. |

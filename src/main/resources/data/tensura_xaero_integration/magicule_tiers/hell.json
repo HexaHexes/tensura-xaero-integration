@@ -4,9 +4,9 @@
   ],
   "baseline": 100500.0,
   "bands": {
-    "slightly_elevated": 1.005,
-    "moderately_elevated": 1.01,
-    "highly_elevated": 1.02,
-    "exceptionally_elevated": 1.03
+    "slightly_elevated": 0.5,
+    "moderately_elevated": 1,
+    "highly_elevated": 2,
+    "exceptionally_elevated": 3
   }
 }

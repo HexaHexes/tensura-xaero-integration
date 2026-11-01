@@ -34,7 +34,7 @@ public final class TierParser {
     /** Datapack directory these files live in. */
     public static final String DIRECTORY = "magicule_tiers";
 
-    /** The band multipliers, all four required when the object is present. */
+    /** The band percentages, all four required when the object is present. */
     private static final List<ConcentrationClassification> ELEVATED_BANDS = List.of(
             ConcentrationClassification.SLIGHTLY_ELEVATED,
             ConcentrationClassification.MODERATELY_ELEVATED,
@@ -136,11 +136,11 @@ public final class TierParser {
             return ConcentrationThresholds.defaults();
         }
         if (!element.isJsonObject()) {
-            problems.add(name + ": \"bands\" must be an object of band multipliers");
+            problems.add(name + ": \"bands\" must be an object of band percentages");
             return ConcentrationThresholds.defaults();
         }
         JsonObject bands = element.getAsJsonObject();
-        double[] multipliers = new double[ELEVATED_BANDS.size()];
+        double[] percents = new double[ELEVATED_BANDS.size()];
         boolean complete = true;
         for (int i = 0; i < ELEVATED_BANDS.size(); i++) {
             String key = ELEVATED_BANDS.get(i).key();
@@ -150,13 +150,13 @@ public final class TierParser {
                 complete = false;
                 break;
             }
-            multipliers[i] = value;
+            percents[i] = value;
         }
         if (!complete) {
             return ConcentrationThresholds.defaults();
         }
         try {
-            return new ConcentrationThresholds(multipliers[0], multipliers[1], multipliers[2], multipliers[3]);
+            return new ConcentrationThresholds(percents[0], percents[1], percents[2], percents[3]);
         } catch (IllegalArgumentException invalid) {
             problems.add(name + ": " + invalid.getMessage());
             return ConcentrationThresholds.defaults();
