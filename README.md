@@ -58,7 +58,7 @@ sends it with the value, so every player on a server sees the same thing.
 
 Those tiers ship as datapack entries and are the intended knob for pack authors:
 `data/<pack>/magicule_tiers/*.json` sets a dimension's normal and, if needed, its
-own band boundaries. See
+own band boundaries, given as percentage increases over that normal. See
 [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md#datapack-per-dimension-tiers).
 
 Defaults are chosen to look good and stay cheap. Every key, default and effect is

@@ -12,6 +12,11 @@ class ConcentrationThresholdsTest {
     private static final double BASELINE = 500.0;
     private final ConcentrationThresholds thresholds = ConcentrationThresholds.defaults();
 
+    /** The absolute value of a band boundary, computed independently of the record. */
+    private static double boundary(double percent) {
+        return BASELINE * (1.0 + percent / 100.0);
+    }
+
     @Test
     void baseline_and_below_are_normal() {
         assertEquals(ConcentrationClassification.NORMAL, thresholds.classify(0.0, BASELINE));
@@ -28,23 +33,23 @@ class ConcentrationThresholdsTest {
     @Test
     void exact_boundaries_belong_to_the_lower_band() {
         assertEquals(ConcentrationClassification.SLIGHTLY_ELEVATED,
-                thresholds.classify(BASELINE * 1.25, BASELINE));
+                thresholds.classify(boundary(25.0), BASELINE));
         assertEquals(ConcentrationClassification.MODERATELY_ELEVATED,
-                thresholds.classify(BASELINE * 2.0, BASELINE));
+                thresholds.classify(boundary(100.0), BASELINE));
         assertEquals(ConcentrationClassification.HIGHLY_ELEVATED,
-                thresholds.classify(BASELINE * 4.0, BASELINE));
+                thresholds.classify(boundary(300.0), BASELINE));
         assertEquals(ConcentrationClassification.EXCEPTIONALLY_ELEVATED,
-                thresholds.classify(BASELINE * 8.0, BASELINE));
+                thresholds.classify(boundary(700.0), BASELINE));
     }
 
     @Test
     void just_above_a_boundary_moves_up_a_band() {
         assertEquals(ConcentrationClassification.MODERATELY_ELEVATED,
-                thresholds.classify(BASELINE * 1.25 + 0.5, BASELINE));
+                thresholds.classify(boundary(25.0) + 0.5, BASELINE));
         assertEquals(ConcentrationClassification.HIGHLY_ELEVATED,
-                thresholds.classify(BASELINE * 2.0 + 0.5, BASELINE));
+                thresholds.classify(boundary(100.0) + 0.5, BASELINE));
         assertEquals(ConcentrationClassification.EXCEPTIONALLY_ELEVATED,
-                thresholds.classify(BASELINE * 4.0 + 0.5, BASELINE));
+                thresholds.classify(boundary(300.0) + 0.5, BASELINE));
     }
 
     @Test
@@ -88,13 +93,13 @@ class ConcentrationThresholdsTest {
     @Test
     void invalid_threshold_sets_are_rejected() {
         assertThrows(IllegalArgumentException.class,
-                () -> new ConcentrationThresholds(1.0, 1.0, 2.0, 3.0));
+                () -> new ConcentrationThresholds(0.0, 0.0, 200.0, 300.0));
         assertThrows(IllegalArgumentException.class,
-                () -> new ConcentrationThresholds(3.0, 2.0, 4.0, 8.0));
+                () -> new ConcentrationThresholds(300.0, 200.0, 400.0, 800.0));
         assertThrows(IllegalArgumentException.class,
-                () -> new ConcentrationThresholds(0.5, 2.0, 4.0, 8.0));
+                () -> new ConcentrationThresholds(-0.5, 200.0, 400.0, 800.0));
         assertThrows(IllegalArgumentException.class,
-                () -> new ConcentrationThresholds(Double.NaN, 2.0, 4.0, 8.0));
+                () -> new ConcentrationThresholds(Double.NaN, 200.0, 400.0, 800.0));
     }
 
     @Test

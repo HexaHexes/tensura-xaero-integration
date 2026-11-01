@@ -41,8 +41,8 @@ class TierParserTest {
     void a_per_dimension_ladder_replaces_the_defaults() {
         TierParser.Result result = parse("hell", """
                 {"dimensions":["tensura:hell"],"baseline":100500.0,
-                 "bands":{"slightly_elevated":1.005,"moderately_elevated":1.01,
-                          "highly_elevated":1.02,"exceptionally_elevated":1.03}}
+                 "bands":{"slightly_elevated":0.5,"moderately_elevated":1.0,
+                          "highly_elevated":2.0,"exceptionally_elevated":3.0}}
                 """);
 
         assertTrue(result.clean(), () -> "unexpected problems: " + result.problems());
@@ -80,7 +80,7 @@ class TierParserTest {
     void a_partial_ladder_is_reported_and_ignored() {
         TierParser.Result result = parse("broken", """
                 {"dimensions":["minecraft:overworld"],"baseline":500.0,
-                 "bands":{"slightly_elevated":1.25}}
+                 "bands":{"slightly_elevated":25.0}}
                 """);
 
         assertFalse(result.clean());
@@ -93,8 +93,8 @@ class TierParserTest {
     void a_non_increasing_ladder_is_rejected() {
         TierParser.Result result = parse("broken", """
                 {"dimensions":["minecraft:overworld"],"baseline":500.0,
-                 "bands":{"slightly_elevated":2.0,"moderately_elevated":2.0,
-                          "highly_elevated":4.0,"exceptionally_elevated":8.0}}
+                 "bands":{"slightly_elevated":100.0,"moderately_elevated":100.0,
+                          "highly_elevated":400.0,"exceptionally_elevated":800.0}}
                 """);
 
         assertFalse(result.clean());

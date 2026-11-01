@@ -481,8 +481,8 @@ callback interface. Only *registration* uses the mixin.
 ## 7. Open questions
 
 1. **Threshold semantics.** Tensura exposes no tier vocabulary; the five presentation
-   tiers are multipliers of the authoritative baseline and are configurable. Defaults
-   are presentation choices, not Tensura rules.
+   tiers are percentage increases over the authoritative baseline and are configurable.
+   Defaults are presentation choices, not Tensura rules.
 2. **Behaviour under Xaero version bumps.** The mixin injection point is verified only
    for 26.6.0 / 1.47.0. No claim is made for other versions.
 3. **Minimap hover text.** Not requested by the specification; the minimap highlighter

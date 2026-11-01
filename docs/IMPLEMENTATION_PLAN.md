@@ -35,7 +35,7 @@ Depends on: Phase 1.
 
 - [x] `cache/ChunkCacheKey` (world token, dimension, chunk x/z) and `ChunkCacheKey`/`net/PackedChunkPos` packing.
 - [x] `concentration/ConcentrationThresholds` + `ConcentrationClassification` (baseline-relative tiers,
-      configurable multipliers, boundary behaviour).
+      configurable percentages, boundary behaviour).
 - [x] `concentration/OverlayPalette` (colour parsing, per-tier ARGB, Xaero colour encoding).
 - [x] `cache/ConcentrationCache` (bounded, timestamped, invalidatable) + `cache/ConcentrationEntry`.
 - [x] `refresh/UpdateQueue` (dedupe, per-chunk minimum interval, bounded drain, retention pruning).
