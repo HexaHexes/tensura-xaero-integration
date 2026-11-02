@@ -10,8 +10,8 @@ import org.bitwisemadness.tensuraxaerointegration.concentration.OverlayPalette;
  * asks for.
  *
  * <p>Everything visual lives here because it only affects this client's screen.
- * The thresholds are multipliers of the authoritative baseline rather than
- * absolute numbers, so a server that changes {@code baseMagicule} keeps the
+ * The thresholds are percentage increases over the authoritative baseline rather
+ * than absolute numbers, so a server that changes {@code baseMagicule} keeps the
  * bands meaningful without every player editing their config.</p>
  */
 public final class ClientConfig {

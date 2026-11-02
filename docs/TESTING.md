@@ -146,7 +146,7 @@ Minecraft-free classes.
 
 | Class | Covers |
 | --- | --- |
-| `concentration/ConcentrationThresholdsTest` | band classification, exact boundaries (inclusive lower band), baseline-relative maths, normal↔elevated transitions both ways, invalid baseline and non-finite input, threshold ordering validation |
+| `concentration/ConcentrationThresholdsTest` | band classification, exact boundaries (inclusive lower band), baseline-relative percentage maths, normal↔elevated transitions both ways, invalid baseline and non-finite input, threshold ordering validation |
 | `concentration/OverlayPaletteTest` | default palette, `#RRGGBB` parsing incl. malformed input, opacity clamping, Xaero colour encoding (`blue<<24 \| green<<16 \| red<<8 \| alpha`), zero-alpha normal chunks |
 | `cache/CacheKeyAndCacheTest` | key isolation across world token, dimension and coordinates; value/replace/invalidate/clear; missing-data vs valid-zero distinction; bounded size and eviction |
 | `cache/RegionKeyMemoTest` | the memoised region key: a repeat ask returns the same instance, a different region, dimension or sign rebuilds, one entry only |
