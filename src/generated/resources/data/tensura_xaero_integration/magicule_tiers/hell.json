@@ -1,0 +1,12 @@
+{
+  "bands": {
+    "exceptionally_elevated": 3.0,
+    "highly_elevated": 2.0,
+    "moderately_elevated": 1.0,
+    "slightly_elevated": 0.5
+  },
+  "baseline": 100500.0,
+  "dimensions": [
+    "tensura:hell"
+  ]
+}

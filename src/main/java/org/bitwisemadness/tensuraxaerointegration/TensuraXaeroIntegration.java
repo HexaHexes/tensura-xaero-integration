@@ -9,6 +9,7 @@ import net.neoforged.fml.config.ModConfig;
 import net.neoforged.fml.event.config.ModConfigEvent;
 import net.neoforged.fml.loading.FMLEnvironment;
 import net.neoforged.neoforge.common.NeoForge;
+import net.neoforged.neoforge.data.event.GatherDataEvent;
 import net.neoforged.neoforge.event.AddReloadListenerEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 import net.neoforged.neoforge.event.server.ServerStartedEvent;
@@ -17,6 +18,8 @@ import net.neoforged.neoforge.event.tick.ServerTickEvent;
 import org.bitwisemadness.tensuraxaerointegration.client.ClientSetup;
 import org.bitwisemadness.tensuraxaerointegration.config.ClientConfig;
 import org.bitwisemadness.tensuraxaerointegration.config.ServerConfig;
+import org.bitwisemadness.tensuraxaerointegration.datagen.JsonFilesProvider;
+import org.bitwisemadness.tensuraxaerointegration.datagen.MagiculeTierContent;
 import org.bitwisemadness.tensuraxaerointegration.net.Network;
 import org.bitwisemadness.tensuraxaerointegration.server.ConcentrationServer;
 import org.bitwisemadness.tensuraxaerointegration.tensura.TensuraBridge;
@@ -56,6 +59,7 @@ public final class TensuraXaeroIntegration {
         }
 
         modBus.addListener(Network::register);
+        modBus.addListener(TensuraXaeroIntegration::gatherData);
         modBus.addListener(TensuraXaeroIntegration::onConfigReloaded);
 
         NeoForge.EVENT_BUS.addListener(TensuraXaeroIntegration::onAddReloadListener);
@@ -109,5 +113,14 @@ public final class TensuraXaeroIntegration {
         if (FMLEnvironment.dist == Dist.CLIENT && event.getConfig().getType() == ModConfig.Type.CLIENT) {
             ClientSetup.onClientConfigReloaded();
         }
+    }
+
+    /** Feeds the shipped tier datapack ({@link MagiculeTierContent}) into datagen. */
+    private static void gatherData(GatherDataEvent event) {
+        if (!event.includeServer()) {
+            return;
+        }
+        event.addProvider(new JsonFilesProvider("magicule_tiers",
+                event.getGenerator().getPackOutput(), MagiculeTierContent.build()));
     }
 }

@@ -1,6 +1,6 @@
 {
+  "baseline": 500.0,
   "dimensions": [
     "minecraft:overworld"
-  ],
-  "baseline": 500.0
+  ]
 }

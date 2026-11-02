@@ -61,6 +61,16 @@ neoForge {
             gameDirectory = project.layout.projectDirectory.dir('run')
         }
 
+        // Regenerates src/generated/resources - the per-dimension tier datapack
+        // that ships inside the jar. --mod scopes datagen to this mod only; every
+        // external mod is optional here, so nothing stages into run/mods.
+        data {
+            data()
+            programArguments.addAll '--mod', mod_id, '--all',
+                    '--output', file('src/generated/resources').absolutePath,
+                    '--existing', file('src/main/resources').absolutePath
+        }
+
         // Dedicated profiling run: the same client the jar is built from, in its own
         // game directory, with the runtime closure AND both Xaero mods staged - no
         // server run loads the map mods, and the plain runClient stages neither, so
@@ -131,6 +141,11 @@ def generateModMetadata = tasks.register('generateModMetadata', ProcessResources
 // wires the dependency so the toml is generated before resources are processed.
 sourceSets.main.resources.srcDir generateModMetadata
 neoForge.ideSyncTask generateModMetadata
+
+// The generated datapack is committed and packaged as part of the mod's
+// resources: datagen owns data/**, the hand-authored originals are gone
+// (issue #27), and the drift gate keeps this tree fresh.
+sourceSets.main.resources.srcDir 'src/generated/resources'
 
 tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'
