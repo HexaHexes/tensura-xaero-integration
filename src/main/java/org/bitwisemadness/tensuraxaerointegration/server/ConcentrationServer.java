@@ -212,8 +212,9 @@ public final class ConcentrationServer {
     /**
      * Called from Tensura's {@code CHUNK_TICK_POST} for an already-loaded chunk.
      *
-     * <p>The chunk is in memory by definition here, so the read is a field access
-     * on its storage; no loading, no generation, no map work.</p>
+     * <p>The chunk is in memory by definition here, so the read is a local lookup
+     * - the stored value plus the chunk's block modifiers - with no loading, no
+     * generation, no map work.</p>
      */
     public void onChunkTicked(ServerLevel level, LevelChunk chunk) {
         if (this.players.isEmpty() || !ServerConfig.syncEnabled()) {

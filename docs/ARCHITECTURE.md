@@ -60,13 +60,15 @@ checks `ModList` for `tensura`; `baseline()`, `baselineAt()`,
 load in a pack without Tensura.
 
 ### `tensura/TensuraAccess`
-The single Tensura-aware class. Reads `ChunkStorage.getMagicule()` through
-`TensuraStorages.getChunkFrom(chunk)` behind a `level.hasChunk(...)` guard.
-`AreaMagiculeHelper.getMagicule(Level, BlockPos)` is **not** used for chunk
-queries because it substitutes `baseMagicule` when the chunk is not loaded,
-which would turn "no data" into a plausible-looking fake value. A chunk that is
-not loaded is reported unavailable; nothing is ever loaded or generated to
-answer a query.
+The single Tensura-aware class. Reads `AreaMagiculeHelper.getMagicule(level,
+samplePos, true)` at the chunk's centre column at `WORLD_SURFACE`, so the
+chunk's **block modifiers** - how a structure's anchored modifier elevates its
+surroundings, and the only mechanism Tensura's own command path sees - count
+toward what the maps paint; the raw stored field never sees them. The helper
+substitutes `baseMagicule` when the chunk is not loaded, so the coordinate-based
+read keeps its `level.hasChunk(...)` guard and the chunk-tick path only ever
+holds loaded chunks: an unloaded chunk is reported unavailable, and nothing is
+ever loaded or generated to answer a query.
 
 ### `tiers/TierReloadListener`
 Loads `data/<namespace>/magicule_tiers/*.json` on world load and on `/reload`

@@ -94,8 +94,10 @@ io.github.manasmods.tensura.storage.chunk.ChunkStorage
   abilities consuming magicule (`consumeMagicule`), and config seed changes all move
   the value.
 - `getMagicule()` returns the chunk-level value; per-block modifiers are applied only
-  by `AreaMagiculeHelper.getMagicule(entity, true)` for a specific position. For a
-  map overlay the chunk-level value is the right quantity.
+  by `AreaMagiculeHelper.getMagicule(..., countBlockModifier = true)` for a specific
+  position. A structure's anchored modifier never moves the stored field, so **the
+  overlay samples a position through the helper** rather than reading the field - the
+  field alone cannot show a modifier elevation.
 
 **Supported accessor used by Tensura itself** (verified, public, and the one this mod uses):
 
@@ -104,6 +106,7 @@ io.github.manasmods.tensura.storage.AreaMagiculeHelper   // public final class
   public static double getMagicule(net.minecraft.world.level.Level, net.minecraft.core.BlockPos);
   public static double getMagicule(net.minecraft.world.entity.LivingEntity);
   public static double getMagicule(LivingEntity, boolean countBlockModifier);
+  public static double getMagicule(Level, BlockPos, boolean countBlockModifier);
   public static double getMaxMagicule(Level, BlockPos);
   public static com.mojang.datafixers.util.Pair<Double,Double> getMagiculePair(Level, BlockPos);
   public static boolean consumeMagicule(Level, BlockPos, double);
@@ -119,9 +122,17 @@ io.github.manasmods.tensura.storage.TensuraStorages
    baseline placeholder, *not* an authoritative value,
 3. otherwise `TensuraStorages.getChunkFrom(level.getChunk(...)).getMagicule()`.
 
-This mod therefore calls `TensuraStorages.getChunkFrom` behind its own
-`level.hasChunk(...)` guard, so a missing/unloaded chunk is reported as *unavailable*
-instead of being silently replaced by the baseline. No chunk is ever loaded or
+The three-argument overload `getMagicule(Level, BlockPos, boolean)` does the
+same and, with the flag `true`, then applies every `BlockMagiculeModifier` on
+the chunk whose `effectDistance` cube contains the position (bytecode-verified:
+one `withinCube` test per modifier, `Mode.ADD` adds, `Mode.MULTIPLY` multiplies,
+result floored at zero) — the only path by which a block-modifier elevation
+becomes a number.
+
+This mod therefore calls the helper behind its own `level.hasChunk(...)`
+guard on the coordinate read (and with an already-loaded chunk on the tick
+path), so a missing/unloaded chunk is reported as *unavailable* instead of
+being silently replaced by the baseline. No chunk is ever loaded or
 generated to answer a query.
 
 ### 2.3 Baseline and units **(verified)**

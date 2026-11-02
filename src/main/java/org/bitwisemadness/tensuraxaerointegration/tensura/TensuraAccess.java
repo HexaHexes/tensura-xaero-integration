@@ -1,11 +1,14 @@
 package org.bitwisemadness.tensuraxaerointegration.tensura;
 
 import io.github.manasmods.tensura.config.AreaMagiculeConfig;
+import io.github.manasmods.tensura.storage.AreaMagiculeHelper;
 import io.github.manasmods.tensura.storage.TensuraStorages;
 import io.github.manasmods.tensura.storage.chunk.ChunkStorage;
 import java.util.OptionalDouble;
+import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.chunk.LevelChunk;
+import net.minecraft.world.level.levelgen.Heightmap;
 
 /**
  * The only class in this mod that imports Tensura: Reincarnated types.
@@ -38,20 +41,36 @@ final class TensuraAccess {
         return read(level.getChunk(chunkX, chunkZ));
     }
 
-    /** Reads a chunk the caller already holds (e.g. from a chunk-tick event). */
+    /**
+     * Reads a chunk the caller already holds (e.g. from a chunk-tick event).
+     *
+     * <p>The read goes through {@link AreaMagiculeHelper} rather than the chunk's
+     * raw stored field, because a source that raises a chunk's concentration via a
+     * block modifier (the mechanism Tensura's own command path uses, and the one
+     * that survives its periodic recompute) lives in the chunk's modifier list -
+     * a raw field read would never answer with it, and the maps would stay
+     * unpainted exactly where a structure's neighbourhood is elevated.</p>
+     */
     static OptionalDouble read(LevelChunk chunk) {
         if (chunk == null || chunk.getLevel().isClientSide()) {
             return OptionalDouble.empty();
         }
-        ChunkStorage storage = TensuraStorages.getChunkFrom(chunk);
-        if (storage == null) {
-            return OptionalDouble.empty();
-        }
-        double value = storage.getMagicule();
+        double value = AreaMagiculeHelper.getMagicule(chunk.getLevel(), representativePosition(chunk), true);
         if (!Double.isFinite(value) || value < 0.0) {
             return OptionalDouble.empty();
         }
         return OptionalDouble.of(value);
+    }
+
+    /**
+     * Where in the chunk the concentration is sampled: the centre column at the
+     * surface, the same representative position Tensura's own chunk write path
+     * uses, so an anchored modifier covering the column answers.
+     */
+    private static BlockPos representativePosition(LevelChunk chunk) {
+        int x = chunk.getPos().getMinBlockX() + 8;
+        int z = chunk.getPos().getMinBlockZ() + 8;
+        return new BlockPos(x, chunk.getHeight(Heightmap.Types.WORLD_SURFACE, 8, 8), z);
     }
 
     /**

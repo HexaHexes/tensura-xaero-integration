@@ -128,13 +128,13 @@ recording number and the exact `jcmd` line when it starts:
 
 No CI job uses either run.
 
-## 2. Latest results (2026-10-27, local, Windows / Git Bash)
+## 2. Latest results (2026-11-01, local, Windows)
 
 | Command | Result |
 | --- | --- |
 | `./gradlew test` | **177 tests, 0 failures, 0 errors** (14 classes) |
 | `./gradlew build` | **BUILD SUCCESSFUL**, jar produced |
-| `./gradlew runGameTestServer` | **6 tests ran, all passed** — `All 6 required tests passed :)`, task reported `GameTest OK: all 6 tests passed` |
+| `./gradlew runGameTestServer` | **7 tests ran, all passed** — `All 7 required tests passed :)`, task reported `GameTest OK: all 7 tests passed` |
 
 These are the only runs backing the claims in this repository. Nothing
 client-rendering related was verified — see §6.
@@ -161,7 +161,7 @@ Minecraft-free classes.
 | `util/ChunkRadiusTest` | the circular request radius: the player's own chunk, exactly-on-radius included, one chunk past and square corners excluded, centred on the player, no overflow at a million chunks, negative radius rejected |
 | `util/ConcentrationTextTest` | hover line formatting, number precision, with and without a classification, unavailable state |
 
-## 4. GameTest suite (6 tests)
+## 4. GameTest suite (7 tests)
 
 Runs on a headless server with the real Tensura jar and its dependency closure on
 the classpath (staged into `run/mods` from CurseMaven by `prepareGametestMods`), so
@@ -171,6 +171,7 @@ these exercise the actual `ChunkStorage` API rather than a stub.
 | --- | --- |
 | `baseline_is_readable` | Tensura's configured baseline is reachable through the bridge and positive |
 | `loaded_chunk_has_a_concentration` | a loaded chunk answers with a finite, non-negative authoritative value |
+| `block_modifier_elevation_is_read` | installing a `BlockMagiculeModifier` on the sampled column adds exactly its amount to the read while the stored field stays put, and removing it restores the plain value — the reader sees modifier elevations the raw field never contains |
 | `unloaded_chunk_is_unavailable` | an unloaded chunk reports *unavailable*, and reading it does not load it |
 | `coordinator_ticks_without_players` | the coordinator is started by the server lifecycle, ticks with no players without throwing, and holds no subscriptions |
 | `tier_datapack_is_loaded` | the datapack reaches the server: dimensions are described, the overworld's described baseline is used and 600 classifies as elevated, and `tensura:hell` gets its own ladder instead of the default |
@@ -215,6 +216,7 @@ default setup unless stated.
 | 15 | World unload and reconnection | cache cleared, values re-requested, no live value carried over from the previous session |
 | 16 | Large mapped area (hundreds of chunks mapped) | client stays smooth; `reconcileBudgetChunksPerPlayer` bounds server work; no spike on dimension change |
 | 17 | Relaunch the game and rejoin the same world | previously mapped chunks show dimmed last-known values immediately, then brighten as the server answers for the ones now loaded; a different world shows nothing from the first |
+| 18 | Stand at a structure whose surroundings a block modifier elevates (e.g. an `infinite-dungeon-spawn-safety` anchor), with the chunk mapped | the neighbourhood is tinted and its hover agrees with `/chunkmagicule get`; a plain chunk far away is unchanged |
 
 For 4, run with `F3` open to confirm the chunk really is unmapped in Xaero, and
 check the client log for subscription packets — an unmapped chunk must not appear

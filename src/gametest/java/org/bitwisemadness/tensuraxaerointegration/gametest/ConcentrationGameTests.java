@@ -1,11 +1,16 @@
 package org.bitwisemadness.tensuraxaerointegration.gametest;
 
+import io.github.manasmods.tensura.data.chunk.BlockMagiculeModifier;
+import io.github.manasmods.tensura.storage.TensuraStorages;
+import io.github.manasmods.tensura.storage.chunk.ChunkStorage;
 import java.util.OptionalDouble;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.SectionPos;
 import net.minecraft.gametest.framework.GameTest;
 import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.level.chunk.LevelChunk;
+import net.minecraft.world.level.levelgen.Heightmap;
 import net.neoforged.neoforge.gametest.GameTestHolder;
 import net.neoforged.neoforge.gametest.PrefixGameTestTemplate;
 import org.bitwisemadness.tensuraxaerointegration.TensuraXaeroIntegration;
@@ -78,6 +83,67 @@ public final class ConcentrationGameTests {
         }
         if (!Double.isFinite(value.getAsDouble()) || value.getAsDouble() < 0.0) {
             helper.fail("Concentration was not a finite non-negative number: " + value.getAsDouble());
+            return;
+        }
+        helper.succeed();
+    }
+
+    /**
+     * A block modifier's elevation reaches the reader while the stored field
+     * stays put, which is what lets a structure's neighbourhood be painted.
+     */
+    @GameTest(template = "empty")
+    public static void block_modifier_elevation_is_read(GameTestHelper helper) {
+        ServerLevel level = helper.getLevel();
+        BlockPos worldPos = helper.absolutePos(new BlockPos(1, 1, 1));
+        int chunkX = SectionPos.blockToSectionCoord(worldPos.getX());
+        int chunkZ = SectionPos.blockToSectionCoord(worldPos.getZ());
+        if (!level.hasChunk(chunkX, chunkZ)) {
+            helper.fail("The test chunk should already be loaded");
+            return;
+        }
+        LevelChunk chunk = level.getChunk(chunkX, chunkZ);
+        ChunkStorage storage = TensuraStorages.getChunkFrom(chunk);
+        if (storage == null) {
+            helper.fail("The test chunk should have Tensura storage");
+            return;
+        }
+        double rawBefore = storage.getMagicule();
+        OptionalDouble plainBefore = TensuraBridge.read(level, chunkX, chunkZ);
+        if (plainBefore.isEmpty()) {
+            helper.fail("A loaded chunk should report a concentration");
+            return;
+        }
+        // The same position the reader samples: the chunk's centre column at the
+        // surface, so the modifier's effect cube covers it by construction.
+        BlockPos sample = new BlockPos(chunk.getPos().getMinBlockX() + 8,
+                chunk.getHeight(Heightmap.Types.WORLD_SURFACE, 8, 8),
+                chunk.getPos().getMinBlockZ() + 8);
+        BlockMagiculeModifier modifier =
+                BlockMagiculeModifier.getSimpleMagiculeAddition(sample, 1000.0, 32.0);
+        storage.getBlockModifiers().add(modifier);
+        OptionalDouble elevated;
+        try {
+            elevated = TensuraBridge.read(level, chunkX, chunkZ);
+        } finally {
+            storage.getBlockModifiers().remove(modifier);
+        }
+        if (elevated.isEmpty()) {
+            helper.fail("A loaded chunk should still answer with a modifier installed");
+            return;
+        }
+        if (Math.abs(elevated.getAsDouble() - (plainBefore.getAsDouble() + 1000.0)) > 1.0e-6) {
+            helper.fail("The modifier should add exactly 1000: plain="
+                    + plainBefore.getAsDouble() + " read=" + elevated.getAsDouble());
+            return;
+        }
+        if (Math.abs(storage.getMagicule() - rawBefore) > 0.0) {
+            helper.fail("Applying a modifier must not move the stored field");
+            return;
+        }
+        OptionalDouble restored = TensuraBridge.read(level, chunkX, chunkZ);
+        if (restored.isEmpty() || Math.abs(restored.getAsDouble() - plainBefore.getAsDouble()) > 1.0e-6) {
+            helper.fail("Removing the modifier should restore the plain read, got " + restored);
             return;
         }
         helper.succeed();
