@@ -383,7 +383,7 @@ def dumpWedgedGametestThreads = {
 // "All N required tests passed :)" when every required test succeeds. Keep
 // expectedTests in sync with the @GameTest methods in src/gametest.
 tasks.matching { it.name == 'runGameTestServer' }.configureEach {
-    def expectedTests = 6
+    def expectedTests = 7
     if (it instanceof JavaExec) {
         it.timeout = java.time.Duration.ofSeconds(gametestTimeoutSeconds)
     }
