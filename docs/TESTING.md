@@ -128,7 +128,7 @@ recording number and the exact `jcmd` line when it starts:
 
 No CI job uses either run.
 
-## 2. Latest results (2026-11-01, local, Windows)
+## 2. Latest results (2026-11-02, local, Windows)
 
 | Command | Result |
 | --- | --- |
