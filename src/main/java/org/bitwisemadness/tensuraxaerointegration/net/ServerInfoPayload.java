@@ -1,5 +1,7 @@
 package org.bitwisemadness.tensuraxaerointegration.net;
 
+import java.util.ArrayList;
+import java.util.List;
 import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
@@ -7,6 +9,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
 import org.bitwisemadness.tensuraxaerointegration.TensuraXaeroIntegration;
 import org.bitwisemadness.tensuraxaerointegration.concentration.OverlayPalette;
+import org.bitwisemadness.tensuraxaerointegration.skill.SkillGate;
 
 /**
  * Server to client: the server's own parameters that the client's presentation
@@ -27,13 +30,16 @@ import org.bitwisemadness.tensuraxaerointegration.concentration.OverlayPalette;
  *       last known on exactly those servers.</li>
  *   <li><b>palette</b> — the datapack's default colours. A client config colour
  *       overrides the band it names; the rest fall back to these values.</li>
+ *   <li><b>skillGate</b> — the sensing gate in force. The client evaluates the
+ *       same rule against its own synced skills, so it can hide the overlay and
+ *       hover for its own remembered values without waiting for the server.</li>
  * </ul>
  *
  * <p>Sent on join and refreshed periodically, so a server config change reaches
  * connected clients.</p>
  */
 public record ServerInfoPayload(double baseline, int refreshIntervalTicks, long refreshIntervalMillis,
-        OverlayPalette palette) implements CustomPacketPayload {
+        OverlayPalette palette, SkillGate skillGate) implements CustomPacketPayload {
 
     public static final Type<ServerInfoPayload> TYPE = new Type<>(
             ResourceLocation.fromNamespaceAndPath(TensuraXaeroIntegration.MOD_ID, "server_info"));
@@ -48,6 +54,7 @@ public record ServerInfoPayload(double baseline, int refreshIntervalTicks, long 
                             buffer.writeVarInt(style.rgb());
                             buffer.writeDouble(style.opacity());
                         }
+                        writeSkillGate(buffer, payload.skillGate);
                     },
                     buffer -> {
                         double baseline = buffer.readDouble();
@@ -58,12 +65,47 @@ public record ServerInfoPayload(double baseline, int refreshIntervalTicks, long 
                             styles[i] = new OverlayPalette.TierStyle(buffer.readVarInt(), buffer.readDouble());
                         }
                         return new ServerInfoPayload(baseline, interval, intervalMillis,
-                                new OverlayPalette(styles[0], styles[1], styles[2], styles[3]));
+                                new OverlayPalette(styles[0], styles[1], styles[2], styles[3]),
+                                readSkillGate(buffer));
                     });
+
+    /** A gate lists a handful of skills at most; anything larger is a bad packet. */
+    private static final int MAX_GATE_SKILLS = 64;
+
+    private static void writeSkillGate(RegistryFriendlyByteBuf buffer, SkillGate gate) {
+        buffer.writeBoolean(gate.enabled());
+        buffer.writeVarInt(gate.requirement().ordinal());
+        List<String> skills = gate.skills();
+        buffer.writeVarInt(skills.size());
+        for (String skill : skills) {
+            buffer.writeUtf(skill);
+        }
+    }
+
+    private static SkillGate readSkillGate(RegistryFriendlyByteBuf buffer) {
+        boolean enabled = buffer.readBoolean();
+        SkillGate.Requirement[] requirements = SkillGate.Requirement.values();
+        int ordinal = buffer.readVarInt();
+        SkillGate.Requirement requirement = ordinal >= 0 && ordinal < requirements.length
+                ? requirements[ordinal]
+                : SkillGate.Requirement.HAS;
+        int count = buffer.readVarInt();
+        if (count < 0 || count > MAX_GATE_SKILLS) {
+            throw new IllegalArgumentException("a skill gate lists at most " + MAX_GATE_SKILLS + " skills");
+        }
+        List<String> skills = new ArrayList<>(count);
+        for (int i = 0; i < count; i++) {
+            skills.add(buffer.readUtf());
+        }
+        return new SkillGate(enabled, requirement, skills);
+    }
 
     public ServerInfoPayload {
         if (palette == null) {
             throw new IllegalArgumentException("the palette is required, if only to say 'use the defaults'");
+        }
+        if (skillGate == null) {
+            throw new IllegalArgumentException("the sensing gate is required, if only to say 'everyone'");
         }
         if (refreshIntervalMillis <= 0) {
             throw new IllegalArgumentException("the refresh promise must be positive, was " + refreshIntervalMillis);
@@ -85,6 +127,6 @@ public record ServerInfoPayload(double baseline, int refreshIntervalTicks, long 
     public static void handle(ServerInfoPayload payload, IPayloadContext context) {
         context.enqueueWork(() -> org.bitwisemadness.tensuraxaerointegration.client.ClientPayloadHandler
                 .onServerInfo(payload.baseline(), payload.refreshIntervalTicks(),
-                        payload.refreshIntervalMillis(), payload.palette()));
+                        payload.refreshIntervalMillis(), payload.palette(), payload.skillGate()));
     }
 }

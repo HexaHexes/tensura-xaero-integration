@@ -35,6 +35,9 @@ public final class HoverText {
      * @param dimensionId the dimension id the chunk belongs to
      */
     public static Component describe(String dimensionId, int chunkX, int chunkZ) {
+        if (!ClientConcentration.get().sensing()) {
+            return null;
+        }
         ClientConcentrationStore store = ClientConcentration.get().store();
         String token = ClientConcentration.get().worldToken();
         ChunkCacheKey key = LAST_LINE.keyFor(token.isBlank() ? "unknown" : token, dimensionId, chunkX, chunkZ);

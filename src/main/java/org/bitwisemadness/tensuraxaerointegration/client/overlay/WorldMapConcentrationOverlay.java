@@ -70,7 +70,7 @@ public final class WorldMapConcentrationOverlay extends ChunkHighlighter {
 
     @Override
     public boolean regionHasHighlights(ResourceKey<Level> dimension, int regionX, int regionZ) {
-        if (!enabled()) {
+        if (!enabled() || !ClientConcentration.get().sensing()) {
             return false;
         }
         return ClientConcentration.get().store().hasRegionData(regionKey(dimension, regionX, regionZ));

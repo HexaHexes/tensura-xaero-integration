@@ -53,11 +53,13 @@ a class that is not loaded.
 ## 3. Server components
 
 ### `tensura/TensuraBridge`
-Side-effect-free facade used by everything else on the server. `isLoaded()`
-checks `ModList` for `tensura`; `baseline()`, `baselineAt()`,
-`concentrationAt(level, chunk)` and `available()` catch `Throwable` and degrade to
-"no data". The bridge deliberately contains no Tensura import, so it is safe to
-load in a pack without Tensura.
+Side-effect-free facade used by everything else. `isLoaded()` checks `ModList`
+for `tensura`; `baseline()`, `baselineAt()`, `concentrationAt(level, chunk)` and
+`available()` catch `Throwable` and degrade to "no data". `senses(gate, entity)`
+answers the sensing gate and degrades the other way — false when Tensura is
+absent or the read threw, because a rule the bridge cannot evaluate must not
+let data through. The bridge deliberately contains no Tensura import, so it is
+safe to load in a pack without Tensura.
 
 ### `tensura/TensuraAccess`
 The single Tensura-aware class. Reads `ChunkStorage.getMagicule()` through
@@ -67,6 +69,11 @@ queries because it substitutes `baseMagicule` when the chunk is not loaded,
 which would turn "no data" into a plausible-looking fake value. A chunk that is
 not loaded is reported unavailable; nothing is ever loaded or generated to
 answer a query.
+
+`senses(SkillGate, LivingEntity)` reads the entity's synced skill storage
+(`SkillAPI.getSkillsFrom` → `Skills.getSkill`) and is the one method here
+meaningful on both sides: the server checks it before sending, the client
+checks its own player before drawing.
 
 ### `tiers/TierReloadListener`
 Loads `data/<namespace>/magicule_tiers/*.json` on world load and on `/reload`
@@ -94,6 +101,7 @@ Server singleton, started on `ServerStartedEvent` and stopped on
 | `cursor` | `ReconcileCursor` — rotates a bounded slice over the subscription set |
 | `receivedSubscribe`, `lastSubscribeTick` | subscription packet rate limiting |
 | `baselinePending` | whether the next tick must push the baseline |
+| `sensing` | whether this player currently satisfies the sensing gate; the flush refuses otherwise |
 
 Responsibilities:
 
@@ -102,12 +110,19 @@ Responsibilities:
   arrived inside `minSubscribePacketIntervalTicks`, a chunk is outside the
   configured radius, or the player's cap is reached. The client's declaration is
   trusted for *which* chunks it has mapped, never for whether a value may be sent.
+- **Skill gate.** Each tick evaluates the configured `SkillGate` per player
+  (`TensuraBridge.senses`). A player who does not qualify has their queue cleared
+  and is skipped entirely — no prune, reconcile, heartbeat or flush — until they
+  qualify again; subscriptions survive the denial, so regaining the skill resumes
+  instantly. The same gate travels to the client in `ServerInfoPayload`, which
+  hides its own overlay, hover and remembered values against the same rule.
 - **Event path.** `onChunkTicked` looks up the key, returns immediately unless
   some player subscribed to that chunk, and then offers the current value to each
   such player's queue. No packet is built per chunk; the queue is flushed once
   per tick.
-- **Periodic path.** `onServerTick` pushes the `ServerInfoPayload` (baseline and
-  refresh cadence) when it is due (200 ticks) or pending, prunes subscriptions
+- **Periodic path.** `onServerTick` pushes the `ServerInfoPayload` (baseline,
+  refresh cadence and the sensing gate) when it is due (200 ticks) or pending,
+  prunes subscriptions
   that left the player's dimension or radius, runs `reconcile` every
   `reconcileIntervalTicks`, runs the heartbeat, and flushes.
 - **Heartbeat.** A chunk parked at its ceiling never changes, so change-gated
@@ -135,7 +150,9 @@ Responsibilities:
   (`-1` = the server could not classify it). The band travels with the value
   because the server owns the tier table.
 - `ServerInfoPayload` (S2C): the server's configured baseline, its refresh cadence
-  in ticks **and in measured milliseconds**, and the datapack palette. Clients
+  in ticks **and in measured milliseconds**, the datapack palette, and the sensing
+  gate (enabled flag, requirement, skill ids) the client evaluates against its own
+  synced skills. Clients
   neither guess the baseline nor keep a second, independent freshness number, and
   paint bands the pack actually chose. The millisecond promise exists because a
   server that cannot keep up stretches its ticks: a client-side window counted in
@@ -162,6 +179,12 @@ The session owner. On every client tick it:
    re-sends the whole set, which is idempotent and self-healing against a server
    radius cap smaller than the client's);
 4. invalidates the map regions whose values changed.
+
+Every tick it also re-evaluates the server's sensing gate against this client's
+own player (`sensing`). While that gate is closed the session unsubscribes,
+clears the store, refuses incoming values, and `hasValue`/`paintState` answer
+nothing — so overlay, hover and replayed history all go dark at once, without
+waiting for the server's next sweep.
 
 The mapped set is built from `WorldMapBridge.mappedChunks(...)` and
 `MinimapBridge.mappedChunks(...)` — the maps' own mapped state, intersected with
@@ -282,8 +305,8 @@ mods and are not interchangeable). They share `concentration/` for classificatio
 and colour, so the two maps can never disagree:
 
 - `chunkIsHighlit` — true only for a chunk present in the store, mapped, fresh,
-  and above the baseline band; this gate also controls whether the tooltip path
-  is consulted at all.
+  above the baseline band, and while the sensing gate is open; this gate also
+  controls whether the tooltip path is consulted at all.
 - `getColors` — the five colours one chunk needs, in Xaero's channel order
   (`blue << 24 | green << 16 | red << 8 | alpha`), with a zero-alpha colour for
   chunks that are highlit only so their tooltip can show. Xaero's
@@ -302,7 +325,8 @@ and colour, so the two maps can never disagree:
   minimap asks once per region, where a memo could never hit.
 - `getBlockHighlightSubtleTooltip` / `getBlockHighlightBluntTooltip` (world map
   only) — the hovered block's chunk, never the player's chunk, rendered through
-  `client/HoverText` and `util/ConcentrationText`. Xaero asks for the blunt tooltip
+  `client/HoverText` and `util/ConcentrationText` (`HoverText` answers nothing
+  while the sensing gate is closed). Xaero asks for the blunt tooltip
   every frame and only reads what it gets back, so `HoverText` remembers the line it
   last built and returns it while the value, its liveness and its band are unchanged:
   a still hover does no number formatting and builds no component graph. The
@@ -341,6 +365,7 @@ world-map-only install loads only what exists.
 | `refresh/UpdateQueue` | change detection, per-chunk minimum interval, heartbeat re-queue, bounded drain, retention pruning |
 | `refresh/ReconcileCursor` | rotating bounded slice over a set |
 | `refresh/CadenceEstimate` | measured confirmation promise: worst recent sweep, floored at nominal and capped |
+| `skill/SkillGate` | the sensing gate policy: on/off, requirement (`HAS`/`MASTERED`/`TOGGLED`), skill ids; fail-open on an empty list |
 | `util/ChunkRadius` | the circular request radius, shared by the client's request and the server's cap |
 | `cache/ConcentrationFileFormat` | strict binary codec for the persisted last-known values |
 | `client/ClientConcentrationStore` | mapped-only ingress, live/last-known states, replay, region versions |
@@ -397,7 +422,8 @@ rotating slice of the player's subscriptions. It exists because
 `CHUNK_TICK_POST` only fires for ticking, loaded chunks: a value that changed
 while no observer ran would otherwise never be corrected, and a chunk that has
 unloaded has to be reported as unavailable so the client can demote its last
-observation instead of presenting it as current.
+observation instead of presenting it as current. Every step above is per-player
+and runs only for players who satisfy the sensing gate (§3).
 
 ## 7. Failure behaviour
 
@@ -412,4 +438,7 @@ observation instead of presenting it as current.
 | Dimension change | old subscriptions released, store saved, cleared and replayed as history |
 | World change / disconnect | session saved, then full reset including baseline |
 | Value unchanged | no packet, no repaint |
+| Sensing gate closed | server reads, queues and sends nothing for that player (subscriptions kept); client hides overlay, hover and remembered values |
+| Gate enabled, Tensura absent | the rule cannot be evaluated, so it denies: fail closed, no data sent |
+| Gate enabled, no skill ids listed | fails open: everyone senses, warned once in the log |
 | Config threshold order invalid | falls back to defaults with one warning |
