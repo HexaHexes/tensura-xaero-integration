@@ -3,6 +3,5 @@
 <!-- Grandfathered findings from the Checkstyle pull: burn-down only, never new code. -->
 <suppressions>
     <suppress checks="RegexpMultiline" files="ConcentrationCache.java" lines="218"/>
-    <suppress checks="RegexpMultiline" files="ClientConcentration.java" lines="255"/>
     <suppress checks="RegexpMultiline" files="ClientConcentrationStoreTest.java" lines="205"/>
 </suppressions>

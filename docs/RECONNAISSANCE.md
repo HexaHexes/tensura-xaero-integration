@@ -244,6 +244,31 @@ changed without a tick observer attached.
   `ServerLevel.getChunkSource()` / `ChunkMap` iteration (vanilla), which this mod uses
   only to walk *subscribed* chunks, never to load any.
 
+### 2.8 Player skills — the sensing-gate source **(verified)**
+
+ManasCore's skill API answers "does this player hold skill X, mastered, or
+toggled" without reaching into Tensura's internals:
+
+- `SkillAPI.getSkillsFrom(LivingEntity)` returns the entity's `SkillStorage`,
+  which implements `Skills` (`io.github.manasmods.manascore.skill.api`).
+- `Skills.getSkill(ResourceLocation)` returns `Optional<ManasSkillInstance>`; an
+  id that was never registered is simply empty, so a mistyped config id reads as
+  "not held" rather than throwing.
+- `ManasSkillInstance.isMastered(LivingEntity)` and `isToggled()` are the two
+  predicates `HAS`/`MASTERED`/`TOGGLED` map onto; `getSkillId()` names the skill.
+- Magic Sense itself is `tensura:magic_sense`, registered in
+  `io.github.manasmods.tensura.registry.skill.ExtraSkills` (display name
+  "Magic Sense" — there is no "Mana Sense" skill). Any other registered sense
+  can be listed instead; the gate accepts any one of them.
+
+Skills travel in the player data synced to the owning client, so the client can
+evaluate the same gate against its own player with no server round trip — which
+is what lets the overlay hide within a tick of a toggle. Verified with `javap`
+against the pinned Tensura/ManasCore jars.
+
+**Consequence:** the gate is one rule evaluated twice — the server refuses to
+send, the client refuses to draw — rather than two rules that could disagree.
+
 ---
 
 ## 3. Xaero's Minimap and Xaero's World Map
@@ -492,8 +517,8 @@ callback interface. Only *registration* uses the mixin.
 ## 7. Open questions
 
 1. **Threshold semantics.** Tensura exposes no tier vocabulary; the five presentation
-   tiers are multipliers of the authoritative baseline and are configurable. Defaults
-   are presentation choices, not Tensura rules.
+   tiers are percentage increases over the authoritative baseline and are configurable.
+   Defaults are presentation choices, not Tensura rules.
 2. **Behaviour under Xaero version bumps.** The mixin injection point is verified only
    for 26.6.0 / 1.47.0. No claim is made for other versions.
 3. **Minimap hover text.** Not requested by the specification; the minimap highlighter

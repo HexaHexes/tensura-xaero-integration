@@ -132,21 +132,21 @@ No CI job uses either run.
 
 | Command | Result |
 | --- | --- |
-| `./gradlew test` | **177 tests, 0 failures, 0 errors** (14 classes) |
+| `./gradlew test` | **185 tests, 0 failures, 0 errors** (15 classes) |
 | `./gradlew build` | **BUILD SUCCESSFUL**, jar produced |
 | `./gradlew runGameTestServer` | **7 tests ran, all passed** — `All 7 required tests passed :)`, task reported `GameTest OK: all 7 tests passed` |
 
 These are the only runs backing the claims in this repository. Nothing
 client-rendering related was verified — see §6.
 
-## 3. JUnit suite (177 tests)
+## 3. JUnit suite (185 tests)
 
 All of these compile and run without Minecraft because the logic sits in
 Minecraft-free classes.
 
 | Class | Covers |
 | --- | --- |
-| `concentration/ConcentrationThresholdsTest` | band classification, exact boundaries (inclusive lower band), baseline-relative maths, normal↔elevated transitions both ways, invalid baseline and non-finite input, threshold ordering validation |
+| `concentration/ConcentrationThresholdsTest` | band classification, exact boundaries (inclusive lower band), baseline-relative percentage maths, normal↔elevated transitions both ways, invalid baseline and non-finite input, threshold ordering validation |
 | `concentration/OverlayPaletteTest` | default palette, `#RRGGBB` parsing incl. malformed input, opacity clamping, Xaero colour encoding (`blue<<24 \| green<<16 \| red<<8 \| alpha`), zero-alpha normal chunks |
 | `cache/CacheKeyAndCacheTest` | key isolation across world token, dimension and coordinates; value/replace/invalidate/clear; missing-data vs valid-zero distinction; bounded size and eviction |
 | `cache/RegionKeyMemoTest` | the memoised region key: a repeat ask returns the same instance, a different region, dimension or sign rebuilds, one entry only |
@@ -160,6 +160,7 @@ Minecraft-free classes.
 | `net/PackedChunkPosTest` | packing/unpacking incl. negative and extreme coordinates |
 | `util/ChunkRadiusTest` | the circular request radius: the player's own chunk, exactly-on-radius included, one chunk past and square corners excluded, centred on the player, no overflow at a million chunks, negative radius rejected |
 | `util/ConcentrationTextTest` | hover line formatting, number precision, with and without a classification, unavailable state |
+| `skill/SkillGateTest` | the sensing gate policy: a disabled gate passes everyone, an empty skill list fails open, `HAS`/`MASTERED`/`TOGGLED` each need exactly their condition, any listed skill satisfies, an unknown id counts as not held, a null requirement is rejected |
 
 ## 4. GameTest suite (7 tests)
 
@@ -175,7 +176,7 @@ these exercise the actual `ChunkStorage` API rather than a stub.
 | `unloaded_chunk_is_unavailable` | an unloaded chunk reports *unavailable*, and reading it does not load it |
 | `coordinator_ticks_without_players` | the coordinator is started by the server lifecycle, ticks with no players without throwing, and holds no subscriptions |
 | `tier_datapack_is_loaded` | the datapack reaches the server: dimensions are described, the overworld's described baseline is used and 600 classifies as elevated, and `tensura:hell` gets its own ladder instead of the default |
-| `server_config_is_usable` | the server config is attached and its bounds are positive |
+| `server_config_is_usable` | the server config is attached, its bounds are positive, and the sensing gate ships enabled-with-defaults sane: a requirement and at least one skill id |
 
 ## 5. What is not automated
 
@@ -216,7 +217,9 @@ default setup unless stated.
 | 15 | World unload and reconnection | cache cleared, values re-requested, no live value carried over from the previous session |
 | 16 | Large mapped area (hundreds of chunks mapped) | client stays smooth; `reconcileBudgetChunksPerPlayer` bounds server work; no spike on dimension change |
 | 17 | Relaunch the game and rejoin the same world | previously mapped chunks show dimmed last-known values immediately, then brighten as the server answers for the ones now loaded; a different world shows nothing from the first |
-| 18 | Stand at a structure whose surroundings a block modifier elevates (e.g. an `infinite-dungeon-spawn-safety` anchor), with the chunk mapped | the neighbourhood is tinted and its hover agrees with `/chunkmagicule get`; a plain chunk far away is unchanged |
+| 18 | Set `skillGate.enabled = true` and join (or be) without a listed skill | no overlay on either map, no hover line; the server log shows no sends to this player |
+| 19 | With the gate on, gain/toggle the listed skill (default: master Magic Sense), then lose it again | overlay and hover appear without relogging, and hide again on the next tick after the skill is unmastered or toggled off |
+| 20 | Stand at a structure whose surroundings a block modifier elevates (e.g. an `infinite-dungeon-spawn-safety` anchor), with the chunk mapped | the neighbourhood is tinted and its hover agrees with `/chunkmagicule get`; a plain chunk far away is unchanged |
 
 For 4, run with `F3` open to confirm the chunk really is unmapped in Xaero, and
 check the client log for subscription packets — an unmapped chunk must not appear

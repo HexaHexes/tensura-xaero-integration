@@ -159,10 +159,10 @@ pack can add a dimension without restating the others.
   "dimensions": ["minecraft:the_nether"],
   "baseline": 600.0,
   "bands": {
-    "slightly_elevated": 1.25,
-    "moderately_elevated": 2.0,
-    "highly_elevated": 4.0,
-    "exceptionally_elevated": 8.0
+    "slightly_elevated": 25.0,
+    "moderately_elevated": 100.0,
+    "highly_elevated": 300.0,
+    "exceptionally_elevated": 700.0
   }
 }
 ```
@@ -171,7 +171,11 @@ pack can add a dimension without restating the others.
 | --- | --- | --- |
 | `dimensions` | yes | One or more dimension ids this entry describes. |
 | `baseline` | yes | The concentration that counts as *normal* there; finite and `> 0`. |
-| `bands` | no | Multipliers of the baseline. All four keys or none — a partial ladder is rejected. Defaults to `1.25 / 2 / 4 / 8`. |
+| `bands` | no | Percentage increases over the baseline, so `25` sits 25% above it (1.25×). All four keys or none — a partial ladder is rejected. Defaults to `25 / 100 / 300 / 700`. |
+
+Entries written before `0.1.0-alpha.15` gave multipliers instead; convert one with
+`percent = (multiplier - 1) × 100`, e.g. `1.25` becomes `25`. A value left as a
+multiplier now means a far smaller increase.
 
 Boundaries are inclusive on the lower band, and anything at or below the baseline
 is *Normal* and unpainted. A dimension no file mentions falls back to Tensura's
@@ -205,7 +209,7 @@ is skipped; the rest still applies.
 | `minecraft:overworld` | `500` | Tensura's `baseMagicule`; `dark_forest` reaches `2000`, `deep_dark` `2500`. |
 | `minecraft:the_nether` | `600` | `baseMagicule × 1.2`; biomes add `1500`–`4500`. |
 | `minecraft:the_end` | `750` | `baseMagicule × 1.5`; end biomes add `4500`. |
-| `tensura:hell` | `100500` | `+100000` level modifier; underworld biomes add `500`–`3500`, so its ladder is tight (`1.005`–`1.03`). |
+| `tensura:hell` | `100500` | `+100000` level modifier; underworld biomes add `500`–`3500`, so its ladder is tight (`0.5`–`3`). |
 | `tensura:labyrinth` | `30000` | `+29500` level modifier, flat void world: uniform, so the default ladder is right. Magic engines subtract from it, which is below normal and therefore unpainted. |
 | `tensura:boss_area` | `500` | Flat void arena, no modifiers. |
 | `iceandfire:dread_land` | `50500` | `+50000` from `tensura_iaf`; both dread biomes contribute nothing, so uniform. |
@@ -233,6 +237,22 @@ which is exactly the knob this datapack provides.
 | Key | Default | Effect |
 | --- | --- | --- |
 | `enabled` | `true` | Master switch. Off: no concentration data leaves the server and every map stays uncoloured. |
+
+### `[skillGate]`
+
+Who may sense at all. With the gate on, a player must hold one of the listed
+skills before the server sends them any concentration data — and their own
+client independently hides the overlay, hover line and remembered values the
+moment its player stops qualifying.
+
+| Key | Default | Effect |
+| --- | --- | --- |
+| `enabled` | `false` | Off (the default): everyone with a map mod sees the overlay, the original behaviour. On: the server refuses to send concentration to any player who does not satisfy `requirement`, and each client also hides what it already holds or remembers while its own player does not qualify. |
+| `requirement` | `MASTERED` | How far a listed skill must be developed: `HAS` means learned, `MASTERED` means fully mastered, `TOGGLED` means currently switched on. |
+| `skills` | `["tensura:magic_sense"]` | Skill ids; **any one** of them satisfies the gate. An id that does not exist is simply not held, so a typo keeps that skill from counting rather than crashing. An empty list with the gate enabled lets everyone through (fail open) and logs a warning. |
+
+With Tensura absent the gate cannot be evaluated server-side, so it denies:
+the maps stay uncoloured rather than bypassing a rule the server cannot check.
 
 ### `[subscriptions]`
 
@@ -262,6 +282,11 @@ which is exactly the knob this datapack provides.
 - **Disclosure** (`sync.enabled`, the caps, the radius) is server-side: a client
   cannot widen it, and a pack operator can switch the feature off world-wide
   without client edits.
+- **The sensing gate** (`skillGate`) is enforced on both sides on purpose. The
+  server refuses to send, so a modified client learns nothing; the client also
+  evaluates the same rule against its own synced skills, so its overlay, hover
+  and remembered values vanish the moment the skill is toggled off — without
+  waiting for the server's next sweep.
 - **Request rate** exists on both sides on purpose. The client decides what it
   wants; the server decides what it will answer and how often, and clamps
   anything the client asks for beyond that.
@@ -276,6 +301,7 @@ which is exactly the knob this datapack provides.
 | Fewer packets | raise `minUpdateIntervalTicks`, raise `refreshIntervalTicks`, raise `maxUpdatesPerPacket` |
 | Larger overlay area | raise client `radiusChunks` **and** server `maxSubscribeRadiusChunks` |
 | Hide the feature on a server | `sync.enabled = false` |
+| Only players with Magic Sense see it | `skillGate.enabled = true` |
 | Remember less history | lower `persistence.maxEntriesPerWorld` |
 | Forget history entirely | delete the world file, or set `persistence.maxEntriesPerWorld = 0` |
 | Make old values fainter | lower `freshness.historicalOpacityScale` |

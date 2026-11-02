@@ -235,6 +235,14 @@ public final class ConcentrationGameTests {
             helper.fail("maxSubscribeRadiusChunks must be positive");
             return;
         }
+        if (ServerConfig.skillGateSkills().isEmpty()) {
+            helper.fail("the sensing gate should ship naming at least one skill id");
+            return;
+        }
+        if (ServerConfig.skillGateRequirement() == null) {
+            helper.fail("the sensing gate needs a requirement");
+            return;
+        }
         helper.succeed();
     }
 }

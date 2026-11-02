@@ -67,19 +67,19 @@ jobs:
           # beta; no pre-release suffix at all means a clean bump, stable.
           case "$RELEASE_TAG" in
             *+g*|*-alpha*)
-              echo "channel=alpha"
-              echo "publish=false"
-              echo "reason=alphas are published to GitHub only, not Modrinth"
+              echo "channel=alpha" >> "$GITHUB_OUTPUT"
+              echo "publish=false" >> "$GITHUB_OUTPUT"
+              echo "reason=alphas are published to GitHub only, not Modrinth" >> "$GITHUB_OUTPUT"
               ;;
             *-*)
-              echo "channel=beta"
-              echo "publish=true"
-              echo "reason=tag carries a pre-release suffix"
+              echo "channel=beta" >> "$GITHUB_OUTPUT"
+              echo "publish=true" >> "$GITHUB_OUTPUT"
+              echo "reason=tag carries a pre-release suffix" >> "$GITHUB_OUTPUT"
               ;;
             *)
-              echo "channel=stable"
-              echo "publish=true"
-              echo "reason=clean version tag"
+              echo "channel=stable" >> "$GITHUB_OUTPUT"
+              echo "publish=true" >> "$GITHUB_OUTPUT"
+              echo "reason=clean version tag" >> "$GITHUB_OUTPUT"
               ;;
           esac
 
@@ -129,13 +129,13 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p staged
-          gh release download "$RELEASE_TAG" \
+          gh release download "$RELEASE_TAG" -R "$GITHUB_REPOSITORY" \
             --pattern '*.jar' \
             --dir staged
           ls -la staged
           echo "ASSET=$(ls staged/*.jar | head -1)" >> "$GITHUB_ENV"
 
-          gh release view "$RELEASE_TAG" --json body --jq '.body' > notes.md
+          gh release view "$RELEASE_TAG" -R "$GITHUB_REPOSITORY" --json body --jq '.body' > notes.md
           echo "Release notes ($(wc -c < notes.md) bytes):"
           cat notes.md
 
@@ -181,7 +181,7 @@ jobs:
           RESPONSE=$(curl --silent --show-error --fail-with-body \
             --request POST \
             --header "Authorization: $MODRINTH_TOKEN" \
-            --form "data=$METADATA" \
+            --form-string "data=$METADATA" \
             --form "file=@$ASSET;type=application/java-archive" \
             "https://api.modrinth.com/v2/version")
 

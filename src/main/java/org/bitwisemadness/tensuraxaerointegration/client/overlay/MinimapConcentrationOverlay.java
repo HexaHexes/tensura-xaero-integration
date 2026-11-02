@@ -41,7 +41,7 @@ public final class MinimapConcentrationOverlay extends ChunkHighlighter {
 
     @Override
     public boolean regionHasHighlights(ResourceKey<Level> dimension, int regionX, int regionZ) {
-        if (!ClientConfig.minimapOverlayEnabled()) {
+        if (!ClientConfig.minimapOverlayEnabled() || !ClientConcentration.get().sensing()) {
             return false;
         }
         return ClientConcentration.get().store().hasRegionData(new RegionKey(

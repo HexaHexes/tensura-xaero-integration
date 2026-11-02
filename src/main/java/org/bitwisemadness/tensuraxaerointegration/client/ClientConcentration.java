@@ -28,6 +28,7 @@ import org.bitwisemadness.tensuraxaerointegration.config.ClientConfig;
 import org.bitwisemadness.tensuraxaerointegration.net.ConcentrationPayload;
 import org.bitwisemadness.tensuraxaerointegration.net.PackedChunkPos;
 import org.bitwisemadness.tensuraxaerointegration.net.SubscriptionPayload;
+import org.bitwisemadness.tensuraxaerointegration.tensura.TensuraBridge;
 import org.bitwisemadness.tensuraxaerointegration.util.ChunkRadius;
 
 /**
@@ -80,6 +81,16 @@ public final class ClientConcentration {
     private volatile int lastResyncTick;
     private int lastSaveTick;
 
+    /**
+     * Whether this client's player satisfies the server's sensing gate.
+     *
+     * <p>Re-evaluated every client tick from the player's synced skills, so a
+     * toggle hides the overlay within a tick rather than at the next subscription
+     * cycle. The server withholds data independently; this is what also hides the
+     * values this client already holds or remembers from disk.</p>
+     */
+    private volatile boolean sensing = true;
+
     // One-shot diagnostics: "why did that value dim?" is otherwise guesswork.
     private volatile boolean expiryReported;
     private volatile boolean massExpiryReported;
@@ -126,6 +137,11 @@ public final class ClientConcentration {
         return this.worldToken;
     }
 
+    /** Whether this player may see concentrations at all under the server's gate. */
+    public boolean sensing() {
+        return this.sensing;
+    }
+
     /** The current dimension id, used to build cache keys. */
     public String dimensionId() {
         return this.dimensionId;
@@ -164,6 +180,9 @@ public final class ClientConcentration {
      * each one, so this reads the store by primitive position instead.</p>
      */
     public int paintState(ResourceKey<Level> dimension, int chunkX, int chunkZ) {
+        if (!this.sensing) {
+            return ClientConcentrationStore.NO_PAINT;
+        }
         ClientConcentrationStore store = store();
         return store.paintState(keyWorldToken(), dimensionIdOf(dimension), chunkX, chunkZ,
                 store.staleAfterMillis());
@@ -171,6 +190,9 @@ public final class ClientConcentration {
 
     /** Whether a chunk holds anything displayable, without building a key. */
     public boolean hasValue(ResourceKey<Level> dimension, int chunkX, int chunkZ) {
+        if (!this.sensing) {
+            return false;
+        }
         return store().hasValue(keyWorldToken(), dimensionIdOf(dimension), chunkX, chunkZ);
     }
 
@@ -207,6 +229,7 @@ public final class ClientConcentration {
         }
         this.ticks.incrementAndGet();
         accountForPause(minecraft);
+        this.sensing = TensuraBridge.senses(store().serverSkillGate(), minecraft.player);
 
         if (this.ticks.get() % MAINTENANCE_INTERVAL_TICKS == 0) {
             // The window follows the server's own confirmation cadence, so it can
@@ -226,10 +249,24 @@ public final class ClientConcentration {
         refreshDirtyRegions();
     }
 
-    /** Handles a batch of values from the server. */
+    /**
+     * Handles a batch of values from the server.
+     *
+     * <p>The mapped test is repeated here as defence in depth: the store refuses
+     * unmapped chunks anyway, but this stops a value being remembered for a chunk
+     * that stopped being mapped between request and reply. A chunk this client
+     * still subscribes is accepted regardless, because the map's region cache
+     * evicting a chunk does not un-map it, and dropping the confirmation would age
+     * a value that is being refreshed on schedule.</p>
+     */
     public void accept(ConcentrationPayload payload) {
         Minecraft minecraft = Minecraft.getInstance();
         if (minecraft.level == null) {
+            return;
+        }
+        if (!this.sensing) {
+            // The server withholds data from a gated player; anything that still
+            // arrives must not enter the store and resurrect a hidden overlay.
             return;
         }
         String dimension = payload.dimension().toString();
@@ -252,12 +289,6 @@ public final class ClientConcentration {
             int chunkX = PackedChunkPos.unpackX(chunks[i]);
             int chunkZ = PackedChunkPos.unpackZ(chunks[i]);
             ChunkCacheKey key = new ChunkCacheKey(token, dimension, chunkX, chunkZ);
-            // Defence in depth: the store refuses unmapped chunks anyway, but the
-            // mapped test is repeated here so a value can never be remembered for
-            // a chunk that stopped being mapped between request and reply. A chunk
-            // this client still subscribes is accepted regardless: the map's
-            // region cache evicting a chunk does not un-map it, and dropping the
-            // confirmation would age a value that is being refreshed on schedule.
             boolean mapped = this.subscriptions.contains(key) || isMapped(dimensionKey, chunkX, chunkZ);
             double value = values[i];
             if (Double.isNaN(value)) {
@@ -286,6 +317,7 @@ public final class ClientConcentration {
         this.subscribeRefreshDue = true;
         this.lastTickMillis = 0L;
         this.pausedAtLastTick = false;
+        this.sensing = true;
         this.expiryReported = false;
         this.massExpiryReported = false;
         this.unavailableReported = false;
@@ -399,7 +431,7 @@ public final class ClientConcentration {
     }
 
     private void updateSubscriptions(Minecraft minecraft) {
-        if (!displayEnabled()) {
+        if (!displayEnabled() || !this.sensing) {
             if (!this.subscriptions.isEmpty()) {
                 sendSubscriptions(false, this.dimensionId, this.subscriptions);
                 this.subscriptions.clear();

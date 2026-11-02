@@ -3,6 +3,7 @@ package org.bitwisemadness.tensuraxaerointegration.client;
 import org.bitwisemadness.tensuraxaerointegration.TensuraXaeroIntegration;
 import org.bitwisemadness.tensuraxaerointegration.concentration.OverlayPalette;
 import org.bitwisemadness.tensuraxaerointegration.net.ConcentrationPayload;
+import org.bitwisemadness.tensuraxaerointegration.skill.SkillGate;
 
 /**
  * Entry point for server-to-client payloads.
@@ -23,11 +24,12 @@ public final class ClientPayloadHandler {
 
     /**
      * Stores the server's presentation parameters: the confirmation cadence the
-     * freshness window derives from, and the datapack palette client config can
-     * override band by band.
+     * freshness window derives from, the datapack palette client config can
+     * override band by band, and the sensing gate the client evaluates against its
+     * own skills.
      */
     public static void onServerInfo(double baseline, int refreshIntervalTicks, long refreshIntervalMillis,
-            OverlayPalette palette) {
+            OverlayPalette palette, SkillGate skillGate) {
         ClientConcentrationStore store = ClientConcentration.get().store();
         // Applied before anything is classified so the window is already the
         // server's when a value arrives.
@@ -35,6 +37,7 @@ public final class ClientPayloadHandler {
             store.setServerRefreshInterval(refreshIntervalTicks, Math.max(1L, refreshIntervalMillis));
         }
         store.setServerPalette(palette);
+        store.setServerSkillGate(skillGate);
         // Logged once per session on purpose: a baseline the server could not
         // read and a cadence mismatch are both invisible in game, and both are
         // answerable from a log rather than from guesswork.

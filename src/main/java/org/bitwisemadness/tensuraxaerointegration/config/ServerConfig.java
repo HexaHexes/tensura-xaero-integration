@@ -1,8 +1,11 @@
 package org.bitwisemadness.tensuraxaerointegration.config;
 
+import java.util.List;
 import net.neoforged.fml.ModContainer;
 import net.neoforged.fml.config.ModConfig;
 import net.neoforged.neoforge.common.ModConfigSpec;
+import org.bitwisemadness.tensuraxaerointegration.TensuraXaeroIntegration;
+import org.bitwisemadness.tensuraxaerointegration.skill.SkillGate;
 
 /**
  * Server-side settings: what may be sent, how much work reconciliation may do,
@@ -21,6 +24,9 @@ public final class ServerConfig {
     private static final ModConfigSpec SPEC;
 
     private static final ModConfigSpec.BooleanValue SYNC_ENABLED;
+    private static final ModConfigSpec.BooleanValue SKILL_GATE_ENABLED;
+    private static final ModConfigSpec.EnumValue<SkillGate.Requirement> SKILL_GATE_REQUIREMENT;
+    private static final ModConfigSpec.ConfigValue<List<? extends String>> SKILL_GATE_SKILLS;
     private static final ModConfigSpec.IntValue RECONCILE_INTERVAL_TICKS;
     private static final ModConfigSpec.IntValue RECONCILE_BUDGET_CHUNKS;
     private static final ModConfigSpec.IntValue MAX_SUBSCRIBED_CHUNKS;
@@ -37,6 +43,23 @@ public final class ServerConfig {
                 .comment("Master switch for concentration synchronisation. When off, the server")
                 .comment("sends no concentration data at all and the maps stay uncoloured.")
                 .define("enabled", true);
+        builder.pop();
+
+        builder.push("skillGate");
+        SKILL_GATE_ENABLED = builder
+                .comment("Require a sensing skill (e.g. Magic Sense) before the server sends a")
+                .comment("player any concentration. Off keeps everyone with a map mod seeing the")
+                .comment("overlay, which is the original behaviour.")
+                .define("enabled", false);
+        SKILL_GATE_REQUIREMENT = builder
+                .comment("How far a listed skill must be developed: HAS means learned, MASTERED")
+                .comment("means fully mastered, TOGGLED means currently switched on.")
+                .defineEnum("requirement", SkillGate.Requirement.MASTERED);
+        SKILL_GATE_SKILLS = builder
+                .comment("Skill ids, any one of which satisfies the gate. The shipped default is")
+                .comment("Magic Sense, the magicule-based sense the overlay belongs to.")
+                .defineList("skills", List.of("tensura:magic_sense"),
+                        element -> element instanceof String text && !text.isBlank());
         builder.pop();
 
         builder.push("subscriptions");
@@ -95,6 +118,45 @@ public final class ServerConfig {
 
     public static boolean syncEnabled() {
         return SYNC_ENABLED.get();
+    }
+
+    /** Whether the open-gate warning has already fired for the current config state. */
+    private static boolean openGateWarned;
+
+    /**
+     * The sensing gate in force, built from the config.
+     *
+     * <p>An enabled gate that names no skill lets everyone through: the config
+     * says "require a skill" while listing none. Failing open beats locking every
+     * player out over a typo, so the state is warned about here - once per
+     * change, not once per tick, since this is read every tick.</p>
+     */
+    public static SkillGate skillGate() {
+        SkillGate gate = new SkillGate(SKILL_GATE_ENABLED.get(), SKILL_GATE_REQUIREMENT.get(),
+                List.copyOf(SKILL_GATE_SKILLS.get()));
+        if (gate.enabled() && gate.skills().isEmpty()) {
+            if (!openGateWarned) {
+                openGateWarned = true;
+                TensuraXaeroIntegration.LOGGER.warn(
+                        "skillGate is enabled but names no skill id; every player may sense until one is listed");
+            }
+        } else {
+            openGateWarned = false;
+        }
+        return gate;
+    }
+
+    public static boolean skillGateEnabled() {
+        return SKILL_GATE_ENABLED.get();
+    }
+
+    public static SkillGate.Requirement skillGateRequirement() {
+        return SKILL_GATE_REQUIREMENT.get();
+    }
+
+    /** The listed skill ids; any one of them satisfies the gate. */
+    public static List<String> skillGateSkills() {
+        return List.copyOf(SKILL_GATE_SKILLS.get());
     }
 
     public static int reconcileIntervalTicks() {
