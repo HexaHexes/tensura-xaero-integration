@@ -2,9 +2,11 @@ package org.bitwisemadness.tensuraxaerointegration.tensura;
 
 import java.util.OptionalDouble;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.neoforged.fml.ModList;
 import org.bitwisemadness.tensuraxaerointegration.TensuraXaeroIntegration;
+import org.bitwisemadness.tensuraxaerointegration.skill.SkillGate;
 
 /**
  * Tensura integration facade.
@@ -63,6 +65,29 @@ public final class TensuraBridge {
             return TensuraAccess.baseline();
         } catch (Throwable failure) {
             return degrade("read the magicule baseline", failure);
+        }
+    }
+
+    /**
+     * Whether an entity's skills satisfy the gate.
+     *
+     * <p>Fails closed: with a gate in force and Tensura unavailable (or a read
+     * that threw), nobody senses. That is the honest reading of a rule the mod
+     * cannot evaluate - the alternative is to let a player sense without a check
+     * just because the check itself broke.</p>
+     */
+    public static boolean senses(SkillGate gate, LivingEntity entity) {
+        if (gate == null || !gate.enabled()) {
+            return true;
+        }
+        if (!isAvailable() || entity == null) {
+            return false;
+        }
+        try {
+            return TensuraAccess.senses(gate, entity);
+        } catch (Throwable failure) {
+            TensuraXaeroIntegration.LOGGER.debug("Tensura integration could not read player skills", failure);
+            return false;
         }
     }
 

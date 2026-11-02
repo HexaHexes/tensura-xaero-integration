@@ -1,11 +1,17 @@
 package org.bitwisemadness.tensuraxaerointegration.tensura;
 
+import io.github.manasmods.manascore.skill.api.ManasSkillInstance;
+import io.github.manasmods.manascore.skill.api.SkillAPI;
+import io.github.manasmods.manascore.skill.api.Skills;
 import io.github.manasmods.tensura.config.AreaMagiculeConfig;
 import io.github.manasmods.tensura.storage.TensuraStorages;
 import io.github.manasmods.tensura.storage.chunk.ChunkStorage;
 import java.util.OptionalDouble;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.level.chunk.LevelChunk;
+import org.bitwisemadness.tensuraxaerointegration.skill.SkillGate;
 
 /**
  * The only class in this mod that imports Tensura: Reincarnated types.
@@ -14,10 +20,11 @@ import net.minecraft.world.level.chunk.LevelChunk;
  * {@link TensuraBridge}, which checks {@code ModList} first. Loading this class
  * without Tensura installed would throw {@link NoClassDefFoundError}.</p>
  *
- * <p>Every method here is server-side. Tensura only stores authoritative chunk
- * magicule in the server's {@code LevelChunk} storage; a client-side
- * {@code ChunkStorage} reports the base value and is never synchronised, so
- * reading it there would silently invent data.</p>
+ * <p>Chunk magicule is read server-side only: Tensura stores it in the server's
+ * {@code LevelChunk} storage, and a client-side {@code ChunkStorage} reports the
+ * base value and is never synchronised, so reading it there would silently invent
+ * data. Player skills are different - they are synced to the owning client - so
+ * {@link #senses} is meaningful on both sides.</p>
  */
 final class TensuraAccess {
 
@@ -73,6 +80,48 @@ final class TensuraAccess {
             return OptionalDouble.empty();
         }
         return OptionalDouble.of(base);
+    }
+
+    /**
+     * Whether an entity's own skills satisfy the sensing gate.
+     *
+     * <p>Reads the entity's synced skill storage, so this is meaningful on both
+     * sides: the server checks it before sending, the client checks its own player
+     * before drawing. A skill id that is not a valid resource location is simply
+     * not held, which is how a mistyped config id behaves: the gate stays closed
+     * for that skill rather than crashing.</p>
+     */
+    static boolean senses(SkillGate gate, LivingEntity entity) {
+        if (entity == null) {
+            return false;
+        }
+        Skills skills = SkillAPI.getSkillsFrom(entity);
+        return gate.allows(new SkillGate.SkillQuery() {
+            @Override
+            public boolean has(String skillId) {
+                return instance(skills, skillId) != null;
+            }
+
+            @Override
+            public boolean mastered(String skillId) {
+                ManasSkillInstance held = instance(skills, skillId);
+                return held != null && held.isMastered(entity);
+            }
+
+            @Override
+            public boolean toggled(String skillId) {
+                ManasSkillInstance held = instance(skills, skillId);
+                return held != null && held.isToggled();
+            }
+        });
+    }
+
+    private static ManasSkillInstance instance(Skills skills, String skillId) {
+        ResourceLocation id = ResourceLocation.tryParse(skillId);
+        if (id == null) {
+            return null;
+        }
+        return skills.getSkill(id).orElse(null);
     }
 
     /** The per-chunk configured maximum, for diagnostics; never used for display. */

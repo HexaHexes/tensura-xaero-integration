@@ -30,6 +30,7 @@ import org.bitwisemadness.tensuraxaerointegration.net.SubscriptionPayload;
 import org.bitwisemadness.tensuraxaerointegration.refresh.CadenceEstimate;
 import org.bitwisemadness.tensuraxaerointegration.refresh.ReconcileCursor;
 import org.bitwisemadness.tensuraxaerointegration.refresh.UpdateQueue;
+import org.bitwisemadness.tensuraxaerointegration.skill.SkillGate;
 import org.bitwisemadness.tensuraxaerointegration.tensura.TensuraBridge;
 import org.bitwisemadness.tensuraxaerointegration.tiers.DimensionTier;
 import org.bitwisemadness.tensuraxaerointegration.tiers.MagiculeTiers;
@@ -42,8 +43,9 @@ import org.bitwisemadness.tensuraxaerointegration.util.ChunkRadius;
  * <ol>
  *   <li><b>Disclosure control.</b> A value is only ever sent to a player who has
  *       subscribed that chunk, only for the dimension the player is in, only for
- *       chunks currently loaded on the server, and only within the configured
- *       distance of the player. Nothing is broadcast.</li>
+ *       chunks currently loaded on the server, only within the configured
+ *       distance of the player, and only when the player satisfies the sensing
+ *       gate. Nothing is broadcast.</li>
  *   <li><b>Event-driven updates.</b> {@link #onChunkTicked} is called from
  *       Tensura's chunk-tick event for chunks that are already loaded; the value
  *       is compared with what was last sent and queued only if it changed.</li>
@@ -270,6 +272,8 @@ public final class ConcentrationServer {
             this.lastBaselineTick = now - SERVER_INFO_REFRESH_INTERVAL_TICKS + BASELINE_RETRY_TICKS;
         }
 
+        SkillGate gate = ServerConfig.skillGate();
+
         for (PlayerState state : this.players.values()) {
             ServerPlayer player = server.getPlayerList().getPlayer(state.id);
             if (player == null) {
@@ -278,15 +282,25 @@ public final class ConcentrationServer {
             state.dimension = player.serverLevel().dimension().location().toString();
             if (!enabled) {
                 state.queue.clear();
+                state.sensing = true;
                 continue;
             }
             if (state.baselinePending || sendServerInfo) {
                 // The heartbeat cadence travels with the baseline: the client derives
-                // its freshness window from it, so the two cannot drift apart.
+                // its freshness window from it, so the two cannot drift apart. The
+                // sensing gate rides along, so a config change reaches the client too.
                 PacketDistributor.sendToPlayer(player, new ServerInfoPayload(baseline,
                         ServerConfig.refreshIntervalTicks(), refreshPromiseMillis(),
-                        MagiculeTiers.get().palette()));
+                        MagiculeTiers.get().palette(), gate));
                 state.baselinePending = false;
+            }
+            state.sensing = TensuraBridge.senses(gate, player);
+            if (!state.sensing) {
+                // Nothing this player may sense is read, queued or sent until they
+                // qualify again. Subscriptions survive, so regaining the skill is
+                // instant.
+                state.queue.clear();
+                continue;
             }
             pruneIneligible(player, state);
             if (now % ServerConfig.reconcileIntervalTicks() == 0) {
@@ -467,6 +481,11 @@ public final class ConcentrationServer {
 
     /** Sends everything the queue allows right now, batched into one payload. */
     private void flush(ServerPlayer player, PlayerState state, int now) {
+        if (!state.sensing) {
+            // Defence in depth: the sweep already skipped this player, and nothing
+            // may leave the server for them regardless of what got queued.
+            return;
+        }
         List<UpdateQueue.Update> ready = state.queue.takeReady(
                 now, ServerConfig.minUpdateIntervalTicks(), ServerConfig.maxUpdatesPerPacket());
         if (ready.isEmpty()) {
@@ -531,6 +550,8 @@ public final class ConcentrationServer {
         private int lastSubscribeTick;
         private boolean receivedSubscribe;
         private boolean baselinePending;
+        /** Whether this player satisfies the sensing gate; the flush refuses otherwise. */
+        private boolean sensing = true;
 
         private PlayerState(UUID id) {
             this.id = id;

@@ -234,6 +234,22 @@ which is exactly the knob this datapack provides.
 | --- | --- | --- |
 | `enabled` | `true` | Master switch. Off: no concentration data leaves the server and every map stays uncoloured. |
 
+### `[skillGate]`
+
+Who may sense at all. With the gate on, a player must hold one of the listed
+skills before the server sends them any concentration data — and their own
+client independently hides the overlay, hover line and remembered values the
+moment its player stops qualifying.
+
+| Key | Default | Effect |
+| --- | --- | --- |
+| `enabled` | `false` | Off (the default): everyone with a map mod sees the overlay, the original behaviour. On: the server refuses to send concentration to any player who does not satisfy `requirement`, and each client also hides what it already holds or remembers while its own player does not qualify. |
+| `requirement` | `MASTERED` | How far a listed skill must be developed: `HAS` means learned, `MASTERED` means fully mastered, `TOGGLED` means currently switched on. |
+| `skills` | `["tensura:magic_sense"]` | Skill ids; **any one** of them satisfies the gate. An id that does not exist is simply not held, so a typo keeps that skill from counting rather than crashing. An empty list with the gate enabled lets everyone through (fail open) and logs a warning. |
+
+With Tensura absent the gate cannot be evaluated server-side, so it denies:
+the maps stay uncoloured rather than bypassing a rule the server cannot check.
+
 ### `[subscriptions]`
 
 | Key | Default | Effect |
@@ -262,6 +278,11 @@ which is exactly the knob this datapack provides.
 - **Disclosure** (`sync.enabled`, the caps, the radius) is server-side: a client
   cannot widen it, and a pack operator can switch the feature off world-wide
   without client edits.
+- **The sensing gate** (`skillGate`) is enforced on both sides on purpose. The
+  server refuses to send, so a modified client learns nothing; the client also
+  evaluates the same rule against its own synced skills, so its overlay, hover
+  and remembered values vanish the moment the skill is toggled off — without
+  waiting for the server's next sweep.
 - **Request rate** exists on both sides on purpose. The client decides what it
   wants; the server decides what it will answer and how often, and clamps
   anything the client asks for beyond that.
@@ -276,6 +297,7 @@ which is exactly the knob this datapack provides.
 | Fewer packets | raise `minUpdateIntervalTicks`, raise `refreshIntervalTicks`, raise `maxUpdatesPerPacket` |
 | Larger overlay area | raise client `radiusChunks` **and** server `maxSubscribeRadiusChunks` |
 | Hide the feature on a server | `sync.enabled = false` |
+| Only players with Magic Sense see it | `skillGate.enabled = true` |
 | Remember less history | lower `persistence.maxEntriesPerWorld` |
 | Forget history entirely | delete the world file, or set `persistence.maxEntriesPerWorld = 0` |
 | Make old values fainter | lower `freshness.historicalOpacityScale` |

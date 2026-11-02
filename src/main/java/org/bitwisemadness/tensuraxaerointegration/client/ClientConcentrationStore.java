@@ -14,6 +14,7 @@ import org.bitwisemadness.tensuraxaerointegration.cache.ConcentrationEntry;
 import org.bitwisemadness.tensuraxaerointegration.cache.RegionKey;
 import org.bitwisemadness.tensuraxaerointegration.concentration.ConcentrationClassification;
 import org.bitwisemadness.tensuraxaerointegration.concentration.OverlayPalette;
+import org.bitwisemadness.tensuraxaerointegration.skill.SkillGate;
 
 /**
  * The client's only view of concentration data, and the single place that
@@ -122,6 +123,7 @@ public final class ClientConcentrationStore {
     private int serverRefreshIntervalTicks = 200;
     private long serverRefreshMillis = DEFAULT_SERVER_REFRESH_MILLIS;
     private OverlayPalette serverPalette = OverlayPalette.defaults();
+    private SkillGate serverSkillGate = SkillGate.disabled();
 
     public ClientConcentrationStore(int maxEntries) {
         this(maxEntries, System::currentTimeMillis);
@@ -183,6 +185,27 @@ public final class ClientConcentrationStore {
     /** The palette the server last supplied; the built-in one until it does. */
     public OverlayPalette serverPalette() {
         return this.serverPalette;
+    }
+
+    /**
+     * Records the sensing gate the server is enforcing.
+     *
+     * <p>The client evaluates the same rule against its own synced skills, which
+     * is what lets it hide its own remembered values the moment the skill is
+     * toggled off, without waiting for the server's next sweep.</p>
+     *
+     * @param gate the server's gate, never null
+     */
+    public void setServerSkillGate(SkillGate gate) {
+        if (gate == null) {
+            throw new IllegalArgumentException("the server's sensing gate cannot be null");
+        }
+        this.serverSkillGate = gate;
+    }
+
+    /** The gate the server last supplied; one that lets everyone through until it does. */
+    public SkillGate serverSkillGate() {
+        return this.serverSkillGate;
     }
 
     /**
@@ -552,6 +575,7 @@ public final class ClientConcentrationStore {
         this.serverRefreshIntervalTicks = 200;
         this.serverRefreshMillis = DEFAULT_SERVER_REFRESH_MILLIS;
         this.serverPalette = OverlayPalette.defaults();
+        this.serverSkillGate = SkillGate.disabled();
         // Paused time belongs to the session that is ending; stamps are cleared too.
         this.pausedMillis = 0L;
     }

@@ -23,6 +23,10 @@ the world map alone is enough.
   how that compares to normal, for example
   `Magicule Concentration: 1450 — Moderately Elevated`.
 - Chunks you have not mapped are never shown, sent or stored.
+- **Optionally, a sensing skill.** A server can require players to hold a skill
+  such as Magic Sense before they are sent any concentration. Without it your
+  maps stay uncoloured: the server sends you nothing, and your own overlay and
+  hover hide until you qualify.
 - Nothing is simulated. The values are Tensura's own. This addon only reads and
   draws them; it never recalculates, guesses or changes concentration.
 
@@ -45,8 +49,9 @@ Two config files, both optional to touch:
 - **Client**: which overlays and hover are on, colours and opacity (which can
   override the pack's), how bright last-known values are, how much history to
   remember, and how far around you data is requested.
-- **Server**: a master switch for sending concentration at all, per-player caps,
-  the distance limit, and how much work reconciliation may spend per cycle.
+- **Server**: a master switch for sending concentration at all, an optional
+  skill gate (Magic Sense by default), per-player caps, the distance limit, and
+  how much work reconciliation may spend per cycle.
 
 ## Per-dimension tiers
 
