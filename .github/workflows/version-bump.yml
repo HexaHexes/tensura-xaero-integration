@@ -27,8 +27,7 @@ on:
           - none
       channel:
         description: >-
-          stable leaves a clean version. beta appends -beta.N and alpha appends
-          -alpha.N, each incrementing while the version stays a pre-release of the
+          stable leaves a clean version. beta appends -beta.NN and alpha appends -alpha.NN (two digits, zero-padded), each incrementing while the version stays a pre-release of the
           same base. Alphas are GitHub-only releases (modrinth.yml never publishes
           them).
         type: choice
@@ -42,6 +41,10 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  # The no-BUMP_PR_TOKEN fallback runs `gh workflow run ci.yml --ref <branch>`;
+  # creating a dispatch event requires actions:write on this token, or the step
+  # 403s and marks an otherwise successful bump run as failed (issue #94).
+  actions: write
 
 # Never cancelled. A branch pushed with no PR open is harder to clean up than a slow run
 # is to wait for.
@@ -109,12 +112,14 @@ jobs:
             # beta and alpha share one shape: the channel name IS the suffix, so
             # -beta.2 continues a beta train and -alpha.3 continues an alpha train
             # on the same base. The suffix must match the REQUESTED channel, so
-            # switching channels restarts at N=1 rather than carrying the count.
+            # switching channels restarts at 01 rather than carrying the count.
+            # Owner ruling (issue #98): counters are always two digits, and the
+            # 10# keeps a padded suffix (08/09) from being read as octal.
             N=1
             if [ -n "$SUFFIX" ] && [ "$NEW_BASE" = "$BASE" ] && printf '%s' "$SUFFIX" | grep -Eq "^${CHANNEL}\.[0-9]+$"; then
-              N=$((${SUFFIX#*.} + 1))
+              N=$((10#${SUFFIX#*.} + 1))
             fi
-            NEW_VERSION="${NEW_BASE}-${CHANNEL}.${N}"
+            NEW_VERSION=$(printf '%s-%s.%02d' "$NEW_BASE" "$CHANNEL" "$N")
           fi
 
           if [ "$NEW_VERSION" = "$CURRENT" ]; then
