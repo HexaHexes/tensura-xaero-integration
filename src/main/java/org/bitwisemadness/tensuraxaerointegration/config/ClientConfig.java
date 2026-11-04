@@ -133,42 +133,56 @@ public final class ClientConfig {
         container.registerConfig(ModConfig.Type.CLIENT, SPEC);
     }
 
+    /**
+     * Reads a value, falling back to its default until NeoForge has loaded the
+     * file (issue #50): client config loading can lag the first client tick, and
+     * a raw {@code get()} before that throws IllegalStateException straight out of
+     * the tick listener and crashes the game. Every getter routes through here,
+     * so a pre-load read costs one tick of defaults instead of a crash; once the
+     * file is loaded the stored value is returned as before.
+     */
+    private static <T> T read(ModConfigSpec.ConfigValue<T> value) {
+        return SPEC.isLoaded() ? value.get() : value.getDefault();
+    }
+
+
+
     public static boolean minimapOverlayEnabled() {
-        return MINIMAP_OVERLAY.get();
+        return read(MINIMAP_OVERLAY);
     }
 
     public static boolean worldMapOverlayEnabled() {
-        return WORLD_MAP_OVERLAY.get();
+        return read(WORLD_MAP_OVERLAY);
     }
 
     public static boolean worldMapHoverEnabled() {
-        return WORLD_MAP_HOVER.get();
+        return read(WORLD_MAP_HOVER);
     }
 
     /** How bright a last-known value is drawn, as a fraction of its band's opacity. */
     public static double historicalOpacityScale() {
-        return HISTORICAL_OPACITY_SCALE.get();
+        return read(HISTORICAL_OPACITY_SCALE);
     }
 
     public static boolean persistenceEnabled() {
-        return PERSISTENCE_ENABLED.get();
+        return read(PERSISTENCE_ENABLED);
     }
 
     /** Most chunks remembered per world, and therefore the in-memory capacity too. */
     public static int persistedEntriesMax() {
-        return PERSISTED_ENTRIES_MAX.get();
+        return read(PERSISTED_ENTRIES_MAX);
     }
 
     public static int subscribeRadiusChunks() {
-        return SUBSCRIBE_RADIUS_CHUNKS.get();
+        return read(SUBSCRIBE_RADIUS_CHUNKS);
     }
 
     public static int subscribeIntervalTicks() {
-        return SUBSCRIBE_INTERVAL_TICKS.get();
+        return read(SUBSCRIBE_INTERVAL_TICKS);
     }
 
     public static int subscribeBatchSize() {
-        return Math.min(512, Math.max(1, SUBSCRIBE_BATCH_SIZE.get()));
+        return Math.min(512, Math.max(1, read(SUBSCRIBE_BATCH_SIZE)));
     }
 
     /**
@@ -204,16 +218,16 @@ public final class ClientConfig {
         }
         OverlayPalette resolved = OverlayPalette.fromConfig(
                 index -> switch (index) {
-                    case 0 -> SLIGHTLY_COLOR.get();
-                    case 1 -> MODERATELY_COLOR.get();
-                    case 2 -> HIGHLY_COLOR.get();
-                    default -> EXCEPTIONALLY_COLOR.get();
+                    case 0 -> read(SLIGHTLY_COLOR);
+                    case 1 -> read(MODERATELY_COLOR);
+                    case 2 -> read(HIGHLY_COLOR);
+                    default -> read(EXCEPTIONALLY_COLOR);
                 },
                 index -> switch (index) {
-                    case 0 -> SLIGHTLY_OPACITY.get();
-                    case 1 -> MODERATELY_OPACITY.get();
-                    case 2 -> HIGHLY_OPACITY.get();
-                    default -> EXCEPTIONALLY_OPACITY.get();
+                    case 0 -> read(SLIGHTLY_OPACITY);
+                    case 1 -> read(MODERATELY_OPACITY);
+                    case 2 -> read(HIGHLY_OPACITY);
+                    default -> read(EXCEPTIONALLY_OPACITY);
                 },
                 server);
         paletteMemo = new PaletteMemo(server, resolved);
