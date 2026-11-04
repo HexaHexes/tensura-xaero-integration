@@ -107,9 +107,12 @@ public final class TensuraXaeroIntegration {
 
     /**
      * Repaints the client when the visual config changes: threshold or colour
-     * edits must not wait for the next concentration change to appear.
+     * edits must not wait for the next concentration change to appear. Catches
+     * the first {@code Loading} as well as {@code Reloading} - a palette memo
+     * resolved from defaults before the file loads must be dropped the moment
+     * the real values arrive (issue #50).
      */
-    private static void onConfigReloaded(ModConfigEvent.Reloading event) {
+    private static void onConfigReloaded(ModConfigEvent event) {
         if (FMLEnvironment.dist == Dist.CLIENT && event.getConfig().getType() == ModConfig.Type.CLIENT) {
             ClientSetup.onClientConfigReloaded();
         }
