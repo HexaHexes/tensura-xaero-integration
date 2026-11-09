@@ -75,3 +75,13 @@ type = "optional"
 versionRange = "[${xaero_world_map_mod_version},)"
 ordering = "AFTER"
 side = "CLIENT"
+
+# ManasCore - optional: the skill reader in TensuraAccess imports it, but
+# that class only loads inside the tensura-gated path, so a ManasCore-less
+# install (or one where Tensura is absent) never reaches it.
+[[dependencies.${mod_id}]]
+modId = "manascore"
+type = "optional"
+versionRange = "[4.0.0.2,)"
+ordering = "AFTER"
+side = "BOTH"
