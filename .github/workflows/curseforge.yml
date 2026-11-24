@@ -58,7 +58,11 @@ jobs:
 
           # CurseForge gets all three channels, alphas included (the Modrinth
           # flow still keeps them GitHub-only - owner ruling).
-          case "$RELEASE_TAG" in
+          # Tags are <loader line>-<version>: classify on the version part
+          # alone, so the loader line's hyphens never read as a pre-release
+          # suffix (legacy v<version> tags pass through unchanged).
+          VERSION="${RELEASE_TAG#*-*-}"
+          case "$VERSION" in
             *+g*|*-alpha*)
               echo "channel=alpha" >> "$GITHUB_OUTPUT"
               echo "publish=false" >> "$GITHUB_OUTPUT"
