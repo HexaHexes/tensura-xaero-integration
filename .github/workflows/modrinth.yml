@@ -61,11 +61,18 @@ jobs:
           echo "tag: $RELEASE_TAG"
 
           # Alphas are GitHub-only by decision, mirroring the CurseForge flow:
-          # they are rolling builds of main, and publishing them would bury the
-          # channel users actually browse. Both the +g rolling-build tags and
-          # the -alpha.N train tags are alphas; a -beta.N suffix publishes as a
-          # beta; no pre-release suffix at all means a clean bump, stable.
-          case "$RELEASE_TAG" in
+          # they are rolling builds of the loader branch, and publishing them
+          # would bury the channel users actually browse.
+          #
+          # Tags are <loader line>-<version>, and neither the loader nor the
+          # Minecraft-version token carries a hyphen, so the version starts
+          # after the second one. Classify on the version alone: the loader
+          # line's own hyphens must not read as a pre-release suffix (they
+          # would drag every stable tag into the beta branch). A tag without
+          # the loader prefix (legacy v<version>, hand dispatch) passes
+          # unchanged.
+          VERSION="${RELEASE_TAG#*-*-}"
+          case "$VERSION" in
             *+g*|*-alpha*)
               echo "channel=alpha" >> "$GITHUB_OUTPUT"
               echo "publish=false" >> "$GITHUB_OUTPUT"

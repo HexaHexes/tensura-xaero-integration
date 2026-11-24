@@ -29,13 +29,15 @@ name: Version bump (post-merge)
 #
 # Owner ruling (amendment to #96, 2026-11-05): the stable cut itself is
 # exempt. The dispatch PR's squash commit ("Bump mod_version to ...") leaves
-# main on the clean version it just published - no train opens and no alpha
+# the default branch on the clean version it just published - no train opens and no alpha
 # is cut beside a fresh stable. The NEXT real change starts
 # x.y.(z+1)-alpha.01 through the clean-stable case below, unchanged.
 
 on:
   push:
-    branches: [ main, master ]
+    # Loader-line branches only (org rule): one branch per supported
+    # loader/version; there is no main/master.
+    branches: [ 'neoforge-*' ]
     paths-ignore:
       - '.github/**'
   # Manual retry for a failed bump: dispatch instead of waiting for the next
@@ -117,11 +119,16 @@ jobs:
           # landed since the last stable tag, the train base may never sit
           # below the minor raise - ci's affirmed rule ("raise major or
           # minor") forbids the patch line the case above would otherwise
-          # open, whose stable cut could then never pass. Same query as
-          # ci.yml's magnitude rule, so train and check read one thing. The
-          # raised base starts a fresh counter (current channel kept for
-          # beta trains).
-          BASELINE=$(git tag --list 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1 || true)
+          # open, whose stable cut could then never pass. Same script as
+          # ci.yml's magnitude rule (issue #109), so train and check read one
+          # thing. The raised base starts a fresh counter (current channel
+          # kept for beta trains).
+          # Both stable-tag shapes through one script (issue #109): the tag
+          # feeds git log, the bare version the semver math below - #v would
+          # not strip a loader-line tag.
+          BASELINE=""
+          BASELINE_VERSION=""
+          read -r BASELINE BASELINE_VERSION < <(bash .github/scripts/stable-baseline.sh) || true
           BREAKING=""
           FLOOR=""
           if [ -n "$BASELINE" ]; then
@@ -129,7 +136,7 @@ jobs:
           fi
           if [ -n "$BREAKING" ]; then
             echo "breaking PRs since $BASELINE: $BREAKING"
-            OLD_BASE="${BASELINE#v}"
+            OLD_BASE="$BASELINE_VERSION"
             MAJOR_OLD=$(echo "$OLD_BASE" | cut -d. -f1)
             MINOR_OLD=$(echo "$OLD_BASE" | cut -d. -f2)
             FLOOR="$MAJOR_OLD.$((MINOR_OLD + 1)).0"
@@ -149,6 +156,8 @@ jobs:
           sed -i "s/^mod_version=.*/mod_version=$NEXT/" gradle.properties
           git add gradle.properties
           git commit -m "Version slot $NEXT (post-merge auto-bump)"
-          git push origin HEAD:main
+          # Push back to the branch this run was triggered on - the loader line
+          # - never a hardcoded trunk name.
+          git push origin "HEAD:$GITHUB_REF_NAME"
 
           echo "pushed $NEXT - the push cascade triggers Release"

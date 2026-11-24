@@ -6,8 +6,8 @@ and pulled in verbatim - **never hand-edit it.** Everything in this file is this
 repo's own and is edited freely; keep it aligned with the org rules rather than
 restating them.
 
-**Repo:** `HexaHexes/tensura-xaero-integration` Γö¼Γòû **Mod ID:** `tensura_xaero_integration` Γö¼Γòû **Branch:** `main`
-**Platform:** Minecraft 1.21.1 / NeoForge 21.1.259 / JDK 21 Γö¼Γòû **Jar:** `build/libs/tensura_xaero_integration-<version>.jar`
+**Repo:** `HexaHexes/tensura-xaero-integration` · **Mod ID:** `tensura_xaero_integration` · **Branch:** `neoforge-1.21.1` (the loader line; this is the default branch - no `main`)
+**Platform:** Minecraft 1.21.1 / NeoForge 21.1.259 / JDK 21 · **Jar:** `build/libs/tensura_xaero_integration-neoforge-1.21.1-<version>.jar`
 
 Shows Tensura: Reincarnated's ambient chunk magicule as a translucent overlay on
 Xaero's Minimap and Xaero's World Map, and reports the hovered chunk's
